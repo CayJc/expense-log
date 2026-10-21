@@ -1,0 +1,787 @@
+name: Build Expense Log APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the app source files
+        run: |
+          mkdir -p app-src && cd app-src
+          mkdir -p "$(dirname 'app/build.gradle')"
+          cat > 'app/build.gradle' <<'PROJECT_EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.spacecay.expenselog'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId 'com.spacecay.expenselog'
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+
+              lint {
+                  abortOnError false
+                  checkReleaseBuilds false
+              }
+          }
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'app/src/main/AndroidManifest.xml')"
+          cat > 'app/src/main/AndroidManifest.xml' <<'PROJECT_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@drawable/ic_launcher"
+                  android:label="Expense Log"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".PaymentListener"
+                      android:exported="true"
+                      android:label="Expense Log"
+                      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.service.notification.NotificationListenerService" />
+                      </intent-filter>
+                  </service>
+              </application>
+          </manifest>
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'app/src/main/java/com/spacecay/expenselog/MainActivity.java')"
+          cat > 'app/src/main/java/com/spacecay/expenselog/MainActivity.java' <<'PROJECT_EOF'
+          package com.spacecay.expenselog;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.os.PowerManager;
+          import android.provider.Settings;
+          import android.text.InputType;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.widget.ArrayAdapter;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.Spinner;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import java.text.SimpleDateFormat;
+          import java.util.Calendar;
+          import java.util.Date;
+          import java.util.List;
+          import java.util.Locale;
+
+          public class MainActivity extends Activity {
+              private static final int BG = Color.parseColor("#F4F6F8");
+              private static final int CARD = Color.WHITE;
+              private static final int TEXT = Color.parseColor("#1B1F24");
+              private static final int MUTED = Color.parseColor("#6B7380");
+              private static final int ACCENT = Color.parseColor("#1565C0");
+              private static final int RED = Color.parseColor("#C62828");
+              private static final int GREEN = Color.parseColor("#2E7D32");
+
+              private TxStore store;
+              private Calendar day = Calendar.getInstance();
+              private LinearLayout root, list, accessBox;
+              private TextView dateLabel, totalLabel, receivedLabel;
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  store = new TxStore(this);
+                  buildUi();
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  refresh();
+              }
+
+              private int dp(int v) {
+                  return Math.round(v * getResources().getDisplayMetrics().density);
+              }
+
+              private TextView text(String s, int sizeSp, int color, boolean bold) {
+                  TextView t = new TextView(this);
+                  t.setText(s);
+                  t.setTextSize(sizeSp);
+                  t.setTextColor(color);
+                  if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
+                  return t;
+              }
+
+              private Button button(String s, View.OnClickListener l) {
+                  Button btn = new Button(this);
+                  btn.setText(s);
+                  btn.setAllCaps(false);
+                  btn.setOnClickListener(l);
+                  return btn;
+              }
+
+              private LinearLayout card() {
+                  LinearLayout c = new LinearLayout(this);
+                  c.setOrientation(LinearLayout.VERTICAL);
+                  c.setPadding(dp(16), dp(14), dp(16), dp(14));
+                  GradientDrawable g = new GradientDrawable();
+                  g.setColor(CARD);
+                  g.setCornerRadius(dp(14));
+                  c.setBackground(g);
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                  lp.setMargins(0, 0, 0, dp(12));
+                  c.setLayoutParams(lp);
+                  return c;
+              }
+
+              private LinearLayout.LayoutParams weight() {
+                  return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+              }
+
+              private void buildUi() {
+                  ScrollView scroll = new ScrollView(this);
+                  scroll.setBackgroundColor(BG);
+                  scroll.setFillViewport(true);
+                  root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(dp(16), dp(20), dp(16), dp(24));
+                  scroll.addView(root);
+
+                  root.addView(text("Expense Log", 26, TEXT, true));
+                  TextView sub = text("Auto-logs telebirr payments. Add CBE ones by hand.", 14, MUTED, false);
+                  sub.setPadding(0, dp(2), 0, dp(14));
+                  root.addView(sub);
+
+                  // Notification access prompt
+                  accessBox = card();
+                  accessBox.addView(text("Notification access is off", 16, RED, true));
+                  TextView why = text("The app needs to read notifications to catch telebirr payments.", 14, MUTED, false);
+                  why.setPadding(0, dp(4), 0, dp(8));
+                  accessBox.addView(why);
+                  accessBox.addView(button("Turn on notification access", v ->
+                          startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))));
+                  root.addView(accessBox);
+
+                  // Day navigation + totals
+                  LinearLayout summary = card();
+                  LinearLayout nav = new LinearLayout(this);
+                  nav.setGravity(Gravity.CENTER_VERTICAL);
+                  Button prev = button("◀", v -> shiftDay(-1));
+                  Button next = button("▶", v -> shiftDay(1));
+                  dateLabel = text("", 17, TEXT, true);
+                  dateLabel.setGravity(Gravity.CENTER);
+                  dateLabel.setOnClickListener(v -> { day = Calendar.getInstance(); refresh(); });
+                  nav.addView(prev);
+                  nav.addView(dateLabel, weight());
+                  nav.addView(next);
+                  summary.addView(nav);
+                  totalLabel = text("", 32, TEXT, true);
+                  totalLabel.setGravity(Gravity.CENTER);
+                  totalLabel.setPadding(0, dp(10), 0, 0);
+                  summary.addView(totalLabel);
+                  TextView spentCaption = text("spent", 14, MUTED, false);
+                  spentCaption.setGravity(Gravity.CENTER);
+                  summary.addView(spentCaption);
+                  receivedLabel = text("", 14, GREEN, false);
+                  receivedLabel.setGravity(Gravity.CENTER);
+                  summary.addView(receivedLabel);
+                  root.addView(summary);
+
+                  // Actions
+                  LinearLayout actions = new LinearLayout(this);
+                  actions.setPadding(0, 0, 0, dp(12));
+                  actions.addView(button("+ Add", v -> showAddDialog()), weight());
+                  actions.addView(button("Copy", v -> copyDay()), weight());
+                  actions.addView(button("Share", v -> shareDay()), weight());
+                  root.addView(actions);
+
+                  list = new LinearLayout(this);
+                  list.setOrientation(LinearLayout.VERTICAL);
+                  root.addView(list);
+
+                  TextView tips = text("Tip: long-press an entry to delete it. Tap the date to jump back to today. "
+                          + "If logging stops, tap below and allow the app to run in the background.", 13, MUTED, false);
+                  tips.setPadding(0, dp(12), 0, dp(4));
+                  root.addView(tips);
+                  root.addView(button("Keep running in background", v -> askBatteryExemption()));
+
+                  setContentView(scroll);
+              }
+
+              private boolean hasAccess() {
+                  String s = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+                  return s != null && s.contains(getPackageName());
+              }
+
+              private void shiftDay(int d) {
+                  day.add(Calendar.DAY_OF_MONTH, d);
+                  refresh();
+              }
+
+              private boolean isToday() {
+                  Calendar now = Calendar.getInstance();
+                  return now.get(Calendar.YEAR) == day.get(Calendar.YEAR)
+                          && now.get(Calendar.DAY_OF_YEAR) == day.get(Calendar.DAY_OF_YEAR);
+              }
+
+              private void refresh() {
+                  accessBox.setVisibility(hasAccess() ? View.GONE : View.VISIBLE);
+                  String d = new SimpleDateFormat("EEE, d MMM", Locale.US).format(day.getTime());
+                  dateLabel.setText(isToday() ? "Today · " + d : d);
+
+                  List<Tx> txs = store.forDay(day);
+                  double out = 0, in = 0;
+                  list.removeAllViews();
+                  SimpleDateFormat tf = new SimpleDateFormat("HH:mm", Locale.US);
+                  for (int i = txs.size() - 1; i >= 0; i--) {
+                      Tx t = txs.get(i);
+                      if (t.incoming) in += t.amount; else out += t.amount;
+                      list.addView(row(t, tf));
+                  }
+                  if (txs.isEmpty()) {
+                      TextView empty = text("No transactions for this day yet.", 15, MUTED, false);
+                      empty.setGravity(Gravity.CENTER);
+                      empty.setPadding(0, dp(24), 0, dp(24));
+                      list.addView(empty);
+                  }
+                  totalLabel.setText(TxStore.money(out) + " ETB");
+                  receivedLabel.setText(in > 0 ? "received " + TxStore.money(in) + " ETB" : "");
+              }
+
+              private View row(Tx t, SimpleDateFormat tf) {
+                  LinearLayout c = card();
+                  LinearLayout top = new LinearLayout(this);
+                  TextView title = text(t.title, 16, TEXT, true);
+                  top.addView(title, weight());
+                  top.addView(text((t.incoming ? "+" : "-") + TxStore.money(t.amount), 16,
+                          t.incoming ? GREEN : RED, true));
+                  c.addView(top);
+                  c.addView(text(tf.format(new Date(t.time)) + " · " + t.source, 13, MUTED, false));
+                  c.setOnLongClickListener(v -> {
+                      new AlertDialog.Builder(this)
+                              .setTitle("Delete this entry?")
+                              .setMessage(t.title + "  " + TxStore.money(t.amount))
+                              .setPositiveButton("Delete", (dlg, w) -> { store.delete(t); refresh(); })
+                              .setNegativeButton("Cancel", null)
+                              .show();
+                      return true;
+                  });
+                  return c;
+              }
+
+              private void showAddDialog() {
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setPadding(dp(20), dp(8), dp(20), 0);
+
+                  EditText amount = new EditText(this);
+                  amount.setHint("Amount (ETB)");
+                  amount.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+                  box.addView(amount);
+
+                  EditText note = new EditText(this);
+                  note.setHint("What was it for?");
+                  note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+                  box.addView(note);
+
+                  Spinner src = new Spinner(this);
+                  ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
+                          new String[]{"CBE", "telebirr", "Cash", "Other"});
+                  src.setAdapter(ad);
+                  box.addView(src);
+
+                  new AlertDialog.Builder(this)
+                          .setTitle("Add payment")
+                          .setView(box)
+                          .setPositiveButton("Save", (dlg, w) -> {
+                              Double a = Parser.amount(amount.getText().toString());
+                              if (a == null) {
+                                  try { a = Double.parseDouble(amount.getText().toString().trim()); }
+                                  catch (Exception e) { a = null; }
+                              }
+                              if (a == null || a <= 0) {
+                                  Toast.makeText(this, "Enter a valid amount", Toast.LENGTH_SHORT).show();
+                                  return;
+                              }
+                              String n = note.getText().toString().trim();
+                              if (n.isEmpty()) n = "Manual entry";
+                              long time = System.currentTimeMillis();
+                              if (!isToday()) {
+                                  Calendar c = (Calendar) day.clone();
+                                  c.set(Calendar.HOUR_OF_DAY, 12);
+                                  c.set(Calendar.MINUTE, 0);
+                                  time = c.getTimeInMillis();
+                              }
+                              store.add(new Tx(time, (String) src.getSelectedItem(), n, a, false, "manual"));
+                              refresh();
+                          })
+                          .setNegativeButton("Cancel", null)
+                          .show();
+              }
+
+              private String report() {
+                  return TxStore.dayReport(day, store.forDay(day));
+              }
+
+              private void copyDay() {
+                  ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                  cm.setPrimaryClip(ClipData.newPlainText("Expenses", report()));
+                  Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show();
+              }
+
+              private void shareDay() {
+                  Intent i = new Intent(Intent.ACTION_SEND);
+                  i.setType("text/plain");
+                  i.putExtra(Intent.EXTRA_TEXT, report());
+                  startActivity(Intent.createChooser(i, "Share expenses"));
+              }
+
+              private void askBatteryExemption() {
+                  try {
+                      PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                      if (pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                          Toast.makeText(this, "Already allowed", Toast.LENGTH_SHORT).show();
+                          return;
+                      }
+                      Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                      i.setData(Uri.parse("package:" + getPackageName()));
+                      startActivity(i);
+                  } catch (Exception e) {
+                      startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                  }
+              }
+          }
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'app/src/main/java/com/spacecay/expenselog/Parser.java')"
+          cat > 'app/src/main/java/com/spacecay/expenselog/Parser.java' <<'PROJECT_EOF'
+          package com.spacecay.expenselog;
+
+          import java.util.Locale;
+          import java.util.regex.Matcher;
+          import java.util.regex.Pattern;
+
+          /** Pulls the amount and direction out of a payment notification. */
+          public class Parser {
+              private static final String NUM = "(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?)";
+
+              private static final Pattern[] PATTERNS = {
+                      // "ETB 100.00", "Birr 50", "Br 20"
+                      Pattern.compile("\\b(?:ETB|Birr|Br)\\.?\\s*[-:]?\\s*" + NUM, Pattern.CASE_INSENSITIVE),
+                      // "100.00 ETB", "50 Birr"
+                      Pattern.compile(NUM + "\\s*(?:ETB|Birr|Br)\\b", Pattern.CASE_INSENSITIVE),
+                      // "Success for -5.00", "amount of 20.00", "Amount: 30"
+                      Pattern.compile("(?:for|of|amount|amt)\\s*:?\\s*-?\\s*" + NUM, Pattern.CASE_INSENSITIVE),
+                      // any number with decimals, e.g. "-5.00"
+                      Pattern.compile("-?\\s*(\\d{1,3}(?:,\\d{3})+\\.\\d{1,2}|\\d+\\.\\d{1,2})(?!\\d)"),
+              };
+
+              public static Double amount(String text) {
+                  if (text == null) return null;
+                  for (Pattern p : PATTERNS) {
+                      Matcher m = p.matcher(text);
+                      while (m.find()) {
+                          try {
+                              double v = Double.parseDouble(m.group(1).replace(",", ""));
+                              if (v > 0 && v < 100000000) return v;
+                          } catch (Exception ignored) {
+                          }
+                      }
+                  }
+                  return null;
+              }
+
+              public static boolean isIncoming(String text) {
+                  String t = text.toLowerCase(Locale.US);
+                  return t.contains("received") || t.contains("credited") || t.contains("deposit")
+                          || t.contains("you have got") || t.contains("cash in");
+              }
+
+              /** Things that look like money but are not a payment you made. */
+              public static boolean isIgnorable(String text) {
+                  String t = text.toLowerCase(Locale.US);
+                  return t.contains("failed") || t.contains("unsuccessful") || t.contains("otp")
+                          || t.contains("verification code") || t.contains("insufficient")
+                          || t.contains("cancelled") || t.contains("canceled");
+              }
+          }
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'app/src/main/java/com/spacecay/expenselog/PaymentListener.java')"
+          cat > 'app/src/main/java/com/spacecay/expenselog/PaymentListener.java' <<'PROJECT_EOF'
+          package com.spacecay.expenselog;
+
+          import android.app.Notification;
+          import android.content.pm.ApplicationInfo;
+          import android.content.pm.PackageManager;
+          import android.os.Bundle;
+          import android.service.notification.NotificationListenerService;
+          import android.service.notification.StatusBarNotification;
+
+          import java.util.Locale;
+
+          /** Reads telebirr / CBE notifications and logs each payment. */
+          public class PaymentListener extends NotificationListenerService {
+
+              @Override
+              public void onNotificationPosted(StatusBarNotification sbn) {
+                  try {
+                      handle(sbn);
+                  } catch (Exception ignored) {
+                  }
+              }
+
+              private void handle(StatusBarNotification sbn) {
+                  String pkg = sbn.getPackageName();
+                  if (pkg == null || pkg.equals(getPackageName())) return;
+
+                  Notification n = sbn.getNotification();
+                  if (n == null) return;
+                  if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
+
+                  String source = sourceFor(pkg);
+                  if (source == null) return;
+
+                  Bundle ex = n.extras;
+                  if (ex == null) return;
+                  String title = str(ex.getCharSequence(Notification.EXTRA_TITLE));
+                  String text = str(ex.getCharSequence(Notification.EXTRA_BIG_TEXT));
+                  if (text.isEmpty()) text = str(ex.getCharSequence(Notification.EXTRA_TEXT));
+                  String full = (title + " " + text).trim();
+                  if (full.isEmpty() || Parser.isIgnorable(full)) return;
+
+                  Double amount = Parser.amount(text);
+                  if (amount == null) amount = Parser.amount(full);
+                  if (amount == null) return;
+
+                  long now = System.currentTimeMillis();
+                  TxStore store = new TxStore(this);
+                  // telebirr often posts two notifications for one payment (e.g. "Airtime" + "Airtime Recharge").
+                  if (store.isDuplicate(source, amount, now)) return;
+
+                  String label = title.isEmpty() ? text : title;
+                  store.add(new Tx(now, source, label, amount, Parser.isIncoming(full), full));
+              }
+
+              private String sourceFor(String pkg) {
+                  String p = pkg.toLowerCase(Locale.US);
+                  String label = "";
+                  try {
+                      PackageManager pm = getPackageManager();
+                      ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                      label = String.valueOf(pm.getApplicationLabel(ai)).toLowerCase(Locale.US);
+                  } catch (Exception ignored) {
+                  }
+                  if (label.contains("telebirr") || p.contains("telebirr") || p.equals("cn.tydic.ethiopay")) {
+                      return "telebirr";
+                  }
+                  if (label.contains("cbe") || label.contains("commercial bank") || p.contains("cbe")
+                          || p.contains("combanketh")) {
+                      return "CBE";
+                  }
+                  return null;
+              }
+
+              private static String str(CharSequence cs) {
+                  return cs == null ? "" : cs.toString().trim();
+              }
+          }
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'app/src/main/java/com/spacecay/expenselog/Tx.java')"
+          cat > 'app/src/main/java/com/spacecay/expenselog/Tx.java' <<'PROJECT_EOF'
+          package com.spacecay.expenselog;
+
+          public class Tx {
+              public long time;
+              public String source;
+              public String title;
+              public double amount;
+              public boolean incoming;
+              public String raw;
+
+              public Tx(long time, String source, String title, double amount, boolean incoming, String raw) {
+                  this.time = time;
+                  this.source = source;
+                  this.title = title;
+                  this.amount = amount;
+                  this.incoming = incoming;
+                  this.raw = raw;
+              }
+
+              private static String clean(String s) {
+                  if (s == null) return "";
+                  return s.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ').trim();
+              }
+
+              public String toLine() {
+                  return time + "\t" + clean(source) + "\t" + clean(title) + "\t" + amount + "\t"
+                          + (incoming ? "IN" : "OUT") + "\t" + clean(raw);
+              }
+
+              public static Tx fromLine(String line) {
+                  try {
+                      String[] p = line.split("\t", -1);
+                      if (p.length < 5) return null;
+                      return new Tx(Long.parseLong(p[0]), p[1], p[2], Double.parseDouble(p[3]),
+                              "IN".equals(p[4]), p.length > 5 ? p[5] : "");
+                  } catch (Exception e) {
+                      return null;
+                  }
+              }
+          }
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'app/src/main/java/com/spacecay/expenselog/TxStore.java')"
+          cat > 'app/src/main/java/com/spacecay/expenselog/TxStore.java' <<'PROJECT_EOF'
+          package com.spacecay.expenselog;
+
+          import android.content.Context;
+
+          import java.io.BufferedReader;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.FileReader;
+          import java.io.FileWriter;
+          import java.io.OutputStreamWriter;
+          import java.nio.charset.StandardCharsets;
+          import java.text.SimpleDateFormat;
+          import java.util.ArrayList;
+          import java.util.Calendar;
+          import java.util.Date;
+          import java.util.List;
+          import java.util.Locale;
+
+          /** Stores every transaction as one tab-separated line in a private text file. */
+          public class TxStore {
+              private static final Object LOCK = new Object();
+              private final File file;
+
+              public TxStore(Context ctx) {
+                  file = new File(ctx.getFilesDir(), "transactions.tsv");
+              }
+
+              public void add(Tx tx) {
+                  synchronized (LOCK) {
+                      try (OutputStreamWriter w = new OutputStreamWriter(
+                              new FileOutputStream(file, true), StandardCharsets.UTF_8)) {
+                          w.write(tx.toLine());
+                          w.write("\n");
+                      } catch (Exception ignored) {
+                      }
+                  }
+              }
+
+              public List<Tx> all() {
+                  List<Tx> list = new ArrayList<>();
+                  synchronized (LOCK) {
+                      if (!file.exists()) return list;
+                      try (BufferedReader r = new BufferedReader(new FileReader(file))) {
+                          String line;
+                          while ((line = r.readLine()) != null) {
+                              Tx t = Tx.fromLine(line);
+                              if (t != null) list.add(t);
+                          }
+                      } catch (Exception ignored) {
+                      }
+                  }
+                  return list;
+              }
+
+              private void writeAll(List<Tx> list) {
+                  try (FileWriter w = new FileWriter(file, false)) {
+                      for (Tx t : list) {
+                          w.write(t.toLine());
+                          w.write("\n");
+                      }
+                  } catch (Exception ignored) {
+                  }
+              }
+
+              public void delete(Tx target) {
+                  synchronized (LOCK) {
+                      List<Tx> list = all();
+                      List<Tx> keep = new ArrayList<>();
+                      boolean removed = false;
+                      for (Tx t : list) {
+                          if (!removed && t.time == target.time && t.amount == target.amount
+                                  && t.title.equals(target.title)) {
+                              removed = true;
+                              continue;
+                          }
+                          keep.add(t);
+                      }
+                      writeAll(keep);
+                  }
+              }
+
+              public List<Tx> forDay(Calendar day) {
+                  Calendar start = (Calendar) day.clone();
+                  start.set(Calendar.HOUR_OF_DAY, 0);
+                  start.set(Calendar.MINUTE, 0);
+                  start.set(Calendar.SECOND, 0);
+                  start.set(Calendar.MILLISECOND, 0);
+                  long from = start.getTimeInMillis();
+                  start.add(Calendar.DAY_OF_MONTH, 1);
+                  long to = start.getTimeInMillis();
+                  List<Tx> out = new ArrayList<>();
+                  for (Tx t : all()) {
+                      if (t.time >= from && t.time < to) out.add(t);
+                  }
+                  return out;
+              }
+
+              /** True if the same amount from the same app was already logged in the last 2 minutes. */
+              public boolean isDuplicate(String source, double amount, long now) {
+                  List<Tx> list = all();
+                  for (int i = list.size() - 1; i >= 0; i--) {
+                      Tx t = list.get(i);
+                      if (now - t.time > 120000) break;
+                      if (t.source.equals(source) && Math.abs(t.amount - amount) < 0.001) return true;
+                  }
+                  return false;
+              }
+
+              public static String money(double v) {
+                  return String.format(Locale.US, "%,.2f", v);
+              }
+
+              public static String dayReport(Calendar day, List<Tx> list) {
+                  SimpleDateFormat dayFmt = new SimpleDateFormat("EEE, d MMM yyyy", Locale.US);
+                  SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm", Locale.US);
+                  StringBuilder sb = new StringBuilder();
+                  sb.append("Expenses - ").append(dayFmt.format(day.getTime())).append("\n\n");
+                  double out = 0, in = 0;
+                  for (Tx t : list) {
+                      sb.append(timeFmt.format(new Date(t.time))).append("  ")
+                              .append(t.source).append("  ")
+                              .append(t.incoming ? "+" : "-").append(money(t.amount)).append("  ")
+                              .append(t.title).append("\n");
+                      if (t.incoming) in += t.amount; else out += t.amount;
+                  }
+                  if (list.isEmpty()) sb.append("No transactions.\n");
+                  sb.append("\nTotal spent: ").append(money(out)).append(" ETB");
+                  if (in > 0) sb.append("\nTotal received: ").append(money(in)).append(" ETB");
+                  return sb.toString();
+              }
+          }
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'app/src/main/res/drawable/ic_launcher.xml')"
+          cat > 'app/src/main/res/drawable/ic_launcher.xml' <<'PROJECT_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#1565C0" android:pathData="M0,0h108v108h-108z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M34,26h40a4,4 0,0 1,4 4v52l-8,-6 -8,6 -8,-6 -8,6 -8,-6 -8,6v-52a4,4 0,0 1,4 -4z" />
+              <path android:fillColor="#1565C0" android:pathData="M40,40h28v5h-28zM40,52h28v5h-28zM40,64h18v5h-18z" />
+          </vector>
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'build.gradle')"
+          cat > 'build.gradle' <<'PROJECT_EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'gradle.properties')"
+          cat > 'gradle.properties' <<'PROJECT_EOF'
+          org.gradle.jvmargs=-Xmx2048m
+          android.useAndroidX=false
+          PROJECT_EOF
+
+          mkdir -p "$(dirname 'settings.gradle')"
+          cat > 'settings.gradle' <<'PROJECT_EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "ExpenseLog"
+          include ':app'
+          PROJECT_EOF
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build the APK
+        working-directory: app-src
+        run: |
+          gradle assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk ../ExpenseLog.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExpenseLog-apk
+          path: ExpenseLog.apk
+
+      - name: Publish APK as a download
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Expense Log build ${{ github.run_number }}
+          files: ExpenseLog.apk
