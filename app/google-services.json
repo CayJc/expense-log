@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "560168167156",
+    "project_id": "expense-log-b926e",
+    "storage_bucket": "expense-log-b926e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:560168167156:android:dd2b82b6f71f1d3959e0a1",
+        "android_client_info": {
+          "package_name": "com.spacecay.expenselog"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDconep_W3A7qNIRw-Vj3xzS3gv4S3Zyzc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

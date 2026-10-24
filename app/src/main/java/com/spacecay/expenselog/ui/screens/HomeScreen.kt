@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -139,6 +140,7 @@ fun HomeScreen(go: (String) -> Unit) {
                             item(Icons.AutoMirrored.Filled.MenuBook, "Books", "books"),
                         ),
                         listOf(
+                            item(Icons.Filled.AccountCircle, "Account & cloud sync", "account"),
                             item(Icons.Filled.Backup, "Backup & export", "backup"),
                             item(Icons.Filled.Settings, "Settings", "settings"),
                         ),

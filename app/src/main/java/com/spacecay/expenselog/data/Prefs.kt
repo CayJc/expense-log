@@ -88,6 +88,14 @@ class Prefs(context: Context) {
         sp.getString("bal_$walletId", null)?.split('|')?.let { p -> p.getOrNull(0)?.toLongOrNull()?.let { a -> a to (p.getOrNull(1)?.toLongOrNull() ?: 0L) } }
     fun setBalanceCheck(walletId: Long, amount: Long, time: Long) { sp.edit().putString("bal_$walletId", "$amount|$time").apply() }
 
+    // ----- Cloud sync -----
+    var lastLocalChange: Long
+        get() = sp.getLong("lastChange", 0L)
+        set(v) = sp.edit().putLong("lastChange", v).apply()
+    var lastCloudSync: Long
+        get() = sp.getLong("lastCloudSync", 0L)
+        set(v) = sp.edit().putLong("lastCloudSync", v).apply()
+
     /** Read SMS from banks / M-PESA (only messages from known payment senders). */
     var readSms: Boolean
         get() = sp.getBoolean("readSms", true)

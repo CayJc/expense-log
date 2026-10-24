@@ -108,5 +108,6 @@ fun AppNav(nav: NavHostController) {
         screen("backup") { BackupScreen(back) }
         screen("settings") { SettingsScreen(back, go) }
         screen("books") { BooksScreen(back) }
+        screen("account") { com.spacecay.expenselog.ui.screens.AccountScreen(back) }
     }
 }

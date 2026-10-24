@@ -102,6 +102,7 @@ class MainActivity : FragmentActivity() {
     override fun onStop() {
         super.onStop()
         lastStop = System.currentTimeMillis()
+        Graph.scope.launch { com.spacecay.expenselog.cloud.Cloud.syncIfNeeded() }
     }
 
     private fun handleIntent(intent: Intent?) {

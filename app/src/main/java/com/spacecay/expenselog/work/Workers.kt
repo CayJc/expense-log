@@ -25,6 +25,7 @@ class PeriodicWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         try { Graph.repo.notifyDueBills(applicationContext) } catch (_: Exception) {}
         try { ScreenshotScanner.scan(applicationContext) } catch (_: Exception) {}
         try { Backup.autoBackupIfDue(applicationContext) } catch (_: Exception) {}
+        try { com.spacecay.expenselog.cloud.Cloud.init(); com.spacecay.expenselog.cloud.Cloud.syncIfNeeded() } catch (_: Exception) {}
         return Result.success()
     }
 }

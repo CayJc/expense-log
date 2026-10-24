@@ -116,7 +116,7 @@ class Repo(private val ctx: Context, private val db: AppDatabase, val dao: AppDa
 
     suspend fun rates(bookId: Long = this.bookId): Rates = Rates.of(dao.getBook(bookId), dao.getRates(bookId))
 
-    fun refreshWidget() { SummaryWidget.requestUpdate(ctx); com.spacecay.expenselog.widget.RecentWidget.requestUpdate(ctx) }
+    fun refreshWidget() { prefs.lastLocalChange = System.currentTimeMillis(); SummaryWidget.requestUpdate(ctx); com.spacecay.expenselog.widget.RecentWidget.requestUpdate(ctx) }
 
     // ---------------- Books ----------------
     suspend fun createBook(name: String, currency: String, withWallets: Boolean): Long = db.withTransaction {

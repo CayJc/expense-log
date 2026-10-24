@@ -10,6 +10,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Graph.init(this)
+        com.spacecay.expenselog.cloud.Cloud.init()
         Notifier.channels(this)
         Graph.scope.launch {
             Graph.repo.ensureSeeded()

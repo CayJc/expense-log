@@ -182,6 +182,7 @@ fun SettingsScreen(back: () -> Unit, go: (String) -> Unit) {
                     SettingRow(Icons.Filled.CurrencyExchange, "Currencies & rates", onClick = { go("currencies") })
                     SettingRow(Icons.Filled.Category, "Categories", onClick = { go("categories") })
                     SettingRow(Icons.AutoMirrored.Filled.MenuBook, "Books", "Separate ledgers, e.g. personal and business", onClick = { go("books") })
+                    SettingRow(Icons.Filled.CloudUpload, "Account & cloud sync", "Sign in with Google or email", onClick = { go("account") })
                     SettingRow(Icons.Filled.Backup, "Backup & export", onClick = { go("backup") })
                 }
             }
