@@ -174,7 +174,7 @@ fun RecurringEditScreen(id: Long, back: () -> Unit) {
     var start by remember { mutableLongStateOf(Dates.combine(System.currentTimeMillis(), 9, 0)) }
     var end by remember { mutableStateOf<Long?>(null) }
     var active by remember { mutableStateOf(true) }
-    var confirm by remember { mutableStateOf(false) }
+    var askFirst by remember { mutableStateOf(false) }
     var pickStart by remember { mutableStateOf(false) }
     var pickEnd by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
@@ -182,7 +182,7 @@ fun RecurringEditScreen(id: Long, back: () -> Unit) {
     LaunchedEffect(id, bd.wallets.isNotEmpty()) {
         if (id != 0L && orig == null) Graph.dao.getRecurring(id)?.let { r ->
             orig = r; type = r.type; amount = Money.toInput(r.amount); walletId = r.walletId; toWalletId = r.toWalletId; categoryId = r.categoryId
-            note = r.note; freq = r.frequency; interval = r.interval.toString(); start = r.startDate; end = r.endDate; active = r.active; confirm = r.confirm
+            note = r.note; freq = r.frequency; interval = r.interval.toString(); start = r.startDate; end = r.endDate; active = r.active; askFirst = r.confirm
         }
         if (walletId == null) walletId = bd.wallets.firstOrNull { !it.archived }?.id
     }
@@ -218,9 +218,9 @@ fun RecurringEditScreen(id: Long, back: () -> Unit) {
                     Text("Get a notification with Add / Skip instead of logging it automatically", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Switch(confirm, { confirm = it })
+                Switch(askFirst, { askFirst = it })
             }
-            Text(if (confirm) "On the due date you'll be asked to add or skip it." else "Transactions are added automatically on each due date (including any missed while the phone was off).",
+            Text(if (askFirst) "On the due date you'll be asked to add or skip it." else "Transactions are added automatically on each due date (including any missed while the phone was off).",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(
                 onClick = {
@@ -244,7 +244,7 @@ fun RecurringEditScreen(id: Long, back: () -> Unit) {
                     val r = (o ?: Recurring(bookId = bd.bookId, type = type, amount = a, walletId = w, startDate = start, nextDate = start)).copy(
                         type = type, amount = a, walletId = w, toWalletId = if (type == 2) toWalletId else null,
                         categoryId = if (type == 2) null else categoryId, note = note.trim(), frequency = freq, interval = iv,
-                        startDate = start, nextDate = next, endDate = end, active = active, confirm = confirm,
+                        startDate = start, nextDate = next, endDate = end, active = active, confirm = askFirst,
                     )
                     scope.launch {
                         if (r.id == 0L) Graph.dao.insertRecurring(r) else Graph.dao.updateRecurring(r)
