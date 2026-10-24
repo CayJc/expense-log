@@ -26,8 +26,23 @@ jobs:
 
       - name: Build the APK
         run: |
-          gradle assembleRelease --no-daemon --stacktrace
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
           cp app/build/outputs/apk/release/app-release.apk ExpenseLog.apk
+
+      - name: Save build log on failure
+        if: failure()
+        run: |
+          grep -E "^e: |error:|What went wrong|FAILURE|Caused by" -A3 build.log | head -300 > errors.txt || true
+          git config user.name "build-bot"
+          git config user.email "build-bot@users.noreply.github.com"
+          git checkout --orphan build-logs
+          git rm -rfq . || true
+          cp errors.txt errors.txt.keep 2>/dev/null || true
+          mv errors.txt.keep errors.txt
+          git add errors.txt
+          git commit -qm "Build ${{ github.run_number }} errors"
+          git push -f origin build-logs
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
