@@ -12,7 +12,20 @@
           "package_name": "com.spacecay.expenselog"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "560168167156-shn42cfeliel6dhal38cddb551jkacb8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.spacecay.expenselog",
+            "certificate_hash": "81b8c0cc3bd32cbf876d9013b679dddd929c4801"
+          }
+        },
+        {
+          "client_id": "560168167156-en4c09h31rnfe53qli0ropph7vk8rv0j.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDconep_W3A7qNIRw-Vj3xzS3gv4S3Zyzc"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "560168167156-en4c09h31rnfe53qli0ropph7vk8rv0j.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
