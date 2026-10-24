@@ -11,6 +11,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,11 +61,14 @@ class MainActivity : FragmentActivity() {
                 )
             }
             AppTheme(theme) {
-                if (locked) {
-                    LockScreen(onUnlock = { locked = false })
-                } else {
-                    val nav = rememberNavController()
-                    AppNav(nav)
+                // Root surface sets the default text/icon colour for every screen (fixes dark text in dark mode).
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
+                    if (locked) {
+                        LockScreen(onUnlock = { locked = false })
+                    } else {
+                        val nav = rememberNavController()
+                        AppNav(nav)
+                    }
                 }
             }
         }

@@ -13,8 +13,8 @@ android {
         applicationId = "com.spacecay.expenselog"
         minSdk = 26
         targetSdk = 34
-        versionCode = 300
-        versionName = "3.0"
+        versionCode = 301
+        versionName = "3.1"
     }
 
     signingConfigs {

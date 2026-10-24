@@ -56,7 +56,7 @@ object Backup {
                 .n("toWalletId", it.toWalletId).n("toAmount", it.toAmount).put("fee", it.fee).n("categoryId", it.categoryId).put("note", it.note)
                 .put("payee", it.payee).put("dateTime", it.dateTime).put("photos", it.photos).put("source", it.source).n("debtId", it.debtId)
                 .n("goalId", it.goalId).n("recurringId", it.recurringId).put("ref", it.ref ?: JSONObject.NULL).put("reviewed", it.reviewed)
-                .put("excludeFromStats", it.excludeFromStats).put("createdAt", it.createdAt)
+                .put("excludeFromStats", it.excludeFromStats).put("createdAt", it.createdAt).n("splitId", it.splitId)
         })
         root.put("budgets", arr(d.allBudgets()) {
             JSONObject().put("id", it.id).put("bookId", it.bookId).put("name", it.name).put("amount", it.amount).put("period", it.period)
@@ -84,7 +84,7 @@ object Backup {
             JSONObject().put("id", it.id).put("bookId", it.bookId).put("type", it.type).put("amount", it.amount).put("walletId", it.walletId)
                 .n("toWalletId", it.toWalletId).n("toAmount", it.toAmount).n("categoryId", it.categoryId).put("note", it.note)
                 .put("frequency", it.frequency).put("interval", it.interval).put("startDate", it.startDate).put("nextDate", it.nextDate)
-                .n("endDate", it.endDate).put("active", it.active)
+                .n("endDate", it.endDate).put("active", it.active).put("confirm", it.confirm)
         })
         root.put("templates", arr(d.allTemplates()) {
             JSONObject().put("id", it.id).put("bookId", it.bookId).put("name", it.name).put("type", it.type).put("amount", it.amount)
@@ -92,6 +92,34 @@ object Backup {
         })
         root.put("rules", arr(d.allRules()) { JSONObject().put("id", it.id).put("bookId", it.bookId).put("keyword", it.keyword).put("categoryId", it.categoryId) })
         return root.toString()
+    }
+
+    // ---- Encryption (AES-256-GCM, key from password via PBKDF2) ----
+    private fun key(password: String, salt: ByteArray): javax.crypto.SecretKey {
+        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, 120_000, 256)
+        val raw = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        return javax.crypto.spec.SecretKeySpec(raw, "AES")
+    }
+
+    fun encrypt(plain: String, password: String): String {
+        val rnd = java.security.SecureRandom()
+        val salt = ByteArray(16).also { rnd.nextBytes(it) }
+        val iv = ByteArray(12).also { rnd.nextBytes(it) }
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.ENCRYPT_MODE, key(password, salt), javax.crypto.spec.GCMParameterSpec(128, iv))
+        val data = c.doFinal(plain.toByteArray())
+        fun b64(b: ByteArray) = android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)
+        return JSONObject().put("app", "ExpenseLog").put("encrypted", 1).put("salt", b64(salt)).put("iv", b64(iv)).put("data", b64(data)).toString()
+    }
+
+    fun isEncrypted(json: String): Boolean = try { JSONObject(json).optInt("encrypted", 0) == 1 } catch (e: Exception) { false }
+
+    fun decrypt(json: String, password: String): String {
+        val o = JSONObject(json)
+        fun d(k: String) = android.util.Base64.decode(o.getString(k), android.util.Base64.NO_WRAP)
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.DECRYPT_MODE, key(password, d("salt")), javax.crypto.spec.GCMParameterSpec(128, d("iv")))
+        return try { String(c.doFinal(d("data"))) } catch (e: Exception) { throw IllegalArgumentException("Wrong password") }
     }
 
     /** Replaces all data with the backup. Throws on invalid file. */
@@ -114,7 +142,7 @@ object Backup {
             d.putTxns(read(r.optJSONArray("transactions")) {
                 Txn(it.l("id"), it.l("bookId"), it.i("type"), it.l("amount"), it.l("walletId"), it.ln("toWalletId"), it.ln("toAmount"), it.l("fee"),
                     it.ln("categoryId"), it.s("note"), it.s("payee"), it.l("dateTime"), it.s("photos"), it.i("source"), it.ln("debtId"), it.ln("goalId"),
-                    it.ln("recurringId"), if (it.isNull("ref")) null else it.optString("ref"), it.b("reviewed", true), it.b("excludeFromStats"), it.l("createdAt"))
+                    it.ln("recurringId"), if (it.isNull("ref")) null else it.optString("ref"), it.b("reviewed", true), it.b("excludeFromStats"), it.l("createdAt"), it.ln("splitId"))
             })
             d.putBudgets(read(r.optJSONArray("budgets")) {
                 Budget(it.l("id"), it.l("bookId"), it.s("name"), it.l("amount"), it.i("period"), it.l("startDate"), it.ln("endDate"),
@@ -136,7 +164,7 @@ object Backup {
             })
             d.putRecurring(read(r.optJSONArray("recurring")) {
                 Recurring(it.l("id"), it.l("bookId"), it.i("type"), it.l("amount"), it.l("walletId"), it.ln("toWalletId"), it.ln("toAmount"),
-                    it.ln("categoryId"), it.s("note"), it.i("frequency"), it.i("interval", 1), it.l("startDate"), it.l("nextDate"), it.ln("endDate"), it.b("active", true))
+                    it.ln("categoryId"), it.s("note"), it.i("frequency"), it.i("interval", 1), it.l("startDate"), it.l("nextDate"), it.ln("endDate"), it.b("active", true), it.b("confirm"))
             })
             d.putTemplates(read(r.optJSONArray("templates")) {
                 Template(it.l("id"), it.l("bookId"), it.s("name"), it.i("type"), it.l("amount"), it.ln("walletId"), it.ln("toWalletId"),
@@ -151,14 +179,18 @@ object Backup {
     fun fileName() = "ExpenseLog-backup-${Dates.fmt("yyyy-MM-dd-HHmm", System.currentTimeMillis())}.json"
 
     suspend fun writeTo(ctx: Context, uri: Uri) {
-        val json = toJson()
+        val pw = Graph.prefs.backupPassword
+        val json = toJson().let { if (!pw.isNullOrEmpty()) encrypt(it, pw) else it }
         ctx.contentResolver.openOutputStream(uri, "wt")?.use { it.write(json.toByteArray()) } ?: error("Couldn't open file")
         Graph.prefs.lastBackup = System.currentTimeMillis()
     }
 
-    suspend fun readFrom(ctx: Context, uri: Uri) {
-        val text = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } ?: error("Couldn't open file")
-        restore(text)
+    fun readText(ctx: Context, uri: Uri): String =
+        ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } ?: error("Couldn't open file")
+
+    /** Restore; [password] needed only for encrypted backups. */
+    suspend fun restoreText(text: String, password: String?) {
+        restore(if (isEncrypted(text)) decrypt(text, password ?: throw IllegalArgumentException("Password needed")) else text)
     }
 
     /** Write a dated backup into the chosen folder; keeps the newest 10. */

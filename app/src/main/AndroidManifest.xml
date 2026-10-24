@@ -9,6 +9,17 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <queries>
+        <package android:name="cn.tydic.ethiopay" />
+        <package android:name="com.combanketh.mobilebanking" />
+        <package android:name="com.boa.boaMobileBanking" />
+        <package android:name="com.boa.apollo" />
+        <package android:name="et.safaricom.mpesa.lifestyle" />
+        <package android:name="com.safaricom.mpesa.lifestyle" />
+        <package android:name="com.samsung.android.messaging" />
+        <package android:name="com.google.android.apps.messaging" />
+    </queries>
+
     <application
         android:name=".App"
         android:allowBackup="true"
@@ -28,6 +39,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
             <intent-filter android:label="Log payment">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -61,6 +75,33 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/summary_widget_info" />
         </receiver>
+
+        <receiver
+            android:name=".widget.RecentWidget"
+            android:exported="true"
+            android:label="Expense Log recent">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/recent_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".work.BillActionReceiver"
+            android:exported="false" />
+
+        <service
+            android:name=".widget.QuickAddTile"
+            android:exported="true"
+            android:icon="@drawable/ic_add_white"
+            android:label="Add expense"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".work.BootReceiver"

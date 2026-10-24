@@ -83,6 +83,7 @@ import com.spacecay.expenselog.ui.rememberBookData
 import com.spacecay.expenselog.ui.theme.LocalMoney
 import com.spacecay.expenselog.util.AppIcons
 import com.spacecay.expenselog.util.Currencies
+import com.spacecay.expenselog.util.Dates
 import com.spacecay.expenselog.util.Money
 import com.spacecay.expenselog.util.Palette
 import kotlinx.coroutines.launch
@@ -121,7 +122,7 @@ fun WalletDetailScreen(id: Long, back: () -> Unit, go: (String) -> Unit) {
             txns.sortedBy { it.dateTime }.forEach { t ->
                 b += when {
                     t.type == TxType.INCOME -> t.amount
-                    t.type == TxType.EXPENSE -> -t.amount
+                    t.type == TxType.EXPENSE -> -(t.amount + t.fee)
                     t.walletId == w.id -> -(t.amount + t.fee)
                     else -> t.toAmount ?: t.amount
                 }
@@ -155,6 +156,36 @@ fun WalletDetailScreen(id: Long, back: () -> Unit, go: (String) -> Unit) {
                     Row {
                         SmallStat("Money in", if (hidden) "••••" else Money.format(income, w.currency), m.income, Modifier.weight(1f))
                         SmallStat("Money out", if (hidden) "••••" else Money.format(expense, w.currency), m.expense, Modifier.weight(1f))
+                    }
+                }
+            }
+            val check = Graph.prefs.balanceCheck(w.id)
+            if (check != null && !hidden) item {
+                val (reported, at) = check
+                // Balance at the time of the message vs the app's balance now (later entries shift it).
+                val after = txns.filter { it.dateTime > at }.sumOf { t ->
+                    when {
+                        t.type == TxType.INCOME -> t.amount
+                        t.type == TxType.EXPENSE -> -(t.amount + t.fee)
+                        t.walletId == w.id -> -(t.amount + t.fee)
+                        else -> t.toAmount ?: t.amount
+                    }
+                }
+                val expected = reported + after
+                val diff = expected - bal
+                AppCard(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
+                    Column {
+                        Text(if (kotlin.math.abs(diff) < 100) "✓ Matches your ${w.name} balance" else "Balance doesn't match",
+                            style = MaterialTheme.typography.titleSmall, color = if (kotlin.math.abs(diff) < 100) m.income else m.expense)
+                        Text("Last message (${Dates.dateTime(at)}) said ${Money.format(reported, w.currency)}." +
+                            if (kotlin.math.abs(diff) >= 100) " Expected now: ${Money.format(expected, w.currency)}, app shows ${Money.format(bal, w.currency)}." else "",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (kotlin.math.abs(diff) >= 100) TextButton(onClick = {
+                            scope.launch {
+                                Graph.repo.saveTxn(Txn(bookId = w.bookId, type = if (diff > 0) TxType.INCOME else TxType.EXPENSE, amount = kotlin.math.abs(diff),
+                                    walletId = w.id, note = "Balance adjustment (from ${w.name} message)", dateTime = System.currentTimeMillis(), excludeFromStats = true))
+                            }
+                        }) { Text("Fix it — add a ${Money.format(kotlin.math.abs(diff), w.currency)} adjustment") }
                     }
                 }
             }

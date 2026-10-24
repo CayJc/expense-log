@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -102,6 +103,7 @@ fun LazyListScope.dayGroupedTxns(
     groups.forEach { (day, list) ->
         item(key = "d$day") {
             val m = LocalMoney.current
+            val eth = com.spacecay.expenselog.data.Graph.prefs.ethCal.collectAsState().value == 1
             val inc = Stats.income(list, bd)
             val exp = Stats.expense(list, bd)
             AppCard(Modifier.padding(horizontal = 16.dp, vertical = 5.dp), padding = androidx.compose.foundation.layout.PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
@@ -111,7 +113,7 @@ fun LazyListScope.dayGroupedTxns(
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(Dates.dayHeader(day), style = MaterialTheme.typography.labelLarge)
-                            Text(Dates.fmt("MMMM yyyy", day), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(Dates.fmt("MMMM yyyy", day) + (if (eth) " · " + com.spacecay.expenselog.util.EthiopianCalendar.format(day, false) else ""), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.Center) {
                             if (inc > 0) Text(if (hidden) "••••" else "+" + Money.plain(inc), color = m.income, style = MaterialTheme.typography.labelMedium)

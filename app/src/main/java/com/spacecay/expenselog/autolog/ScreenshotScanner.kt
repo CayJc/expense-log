@@ -50,7 +50,9 @@ object ScreenshotScanner {
             val bucketCol = c.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
             while (c.moveToNext()) {
                 val bucket = if (bucketCol >= 0) c.getString(bucketCol).orEmpty() else ""
-                if (!bucket.contains("screenshot", ignoreCase = true)) continue
+                // Screenshots plus receipt images banking apps save (BoA / Apollo / CBE / telebirr / Downloads).
+                val b = bucket.lowercase()
+                if (listOf("screenshot", "abyssinia", "boa", "apollo", "cbe", "telebirr", "receipt", "download", "m-pesa", "mpesa").none { it in b }) continue
                 val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(idCol))
                 shots += uri to c.getLong(dateCol) * 1000
             }

@@ -97,6 +97,7 @@ fun SettingsScreen(back: () -> Unit, go: (String) -> Unit) {
     val prefs = Graph.prefs
     val theme by prefs.theme.collectAsStateWithLifecycle()
     val hidden by prefs.hideAmounts.collectAsStateWithLifecycle()
+    val eth by prefs.ethCal.collectAsStateWithLifecycle()
     var lockOn by remember { mutableStateOf(prefs.lockEnabled) }
     var bio by remember { mutableStateOf(prefs.biometric) }
     var setPin by remember { mutableStateOf(false) }
@@ -156,6 +157,10 @@ fun SettingsScreen(back: () -> Unit, go: (String) -> Unit) {
                 }
             }
             AppCard(padding = PaddingValues(4.dp)) {
+                SettingRow(Icons.Filled.Today, "Ethiopian calendar", if (eth == 1) "Showing Ethiopian dates next to Gregorian (today: ${com.spacecay.expenselog.util.EthiopianCalendar.format(System.currentTimeMillis())})" else "Off",
+                    trailing = { Switch(eth == 1, { prefs.setEthCal(if (it) 1 else 0) }) })
+            }
+            AppCard(padding = PaddingValues(4.dp)) {
                 SettingRow(Icons.Filled.CalendarMonth, "Month starts on day $monthStart", "Use your salary day so monthly totals and budgets line up",
                     onClick = { pickMonthStart = true })
             }
@@ -181,7 +186,7 @@ fun SettingsScreen(back: () -> Unit, go: (String) -> Unit) {
                 }
             }
             AppCard(padding = PaddingValues(4.dp)) {
-                SettingRow(Icons.Filled.Info, "Expense Log 3.0", "Every feature unlocked · no ads · data stays on your phone")
+                SettingRow(Icons.Filled.Info, "Expense Log 3.1", "Every feature unlocked · no ads · data stays on your phone")
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -315,6 +320,9 @@ fun BackupScreen(back: () -> Unit) {
     var pickFrom by remember { mutableStateOf(false) }
     var pickTo by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var hasPw by remember { mutableStateOf(!prefs.backupPassword.isNullOrEmpty()) }
+    var pwDialog by remember { mutableStateOf(false) }
+    var restoreText by remember { mutableStateOf<String?>(null) }
 
     fun toast(s: String) { UiBus.toast.tryEmit(s) }
     val range = Range(Dates.startOfDay(from), Dates.day(to).end)
@@ -329,7 +337,7 @@ fun BackupScreen(back: () -> Unit) {
         if (uri != null) {
             ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             prefs.backupFolder = uri.toString(); folder = uri.toString()
-            if (auto == 0) { auto = 1; prefs.autoBackup = 1 }
+            if (auto == 0) { auto = 2; prefs.autoBackup = 2 }
         }
     }
     val csv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
@@ -347,6 +355,8 @@ fun BackupScreen(back: () -> Unit) {
                     SettingRow(Icons.Filled.CloudUpload, "Back up now", if (last > 0) "Last backup ${Dates.dateTime(last)}" else "Save a file — pick Google Drive to keep it in the cloud",
                         onClick = { saveBackup.launch(Backup.fileName()) })
                     SettingRow(Icons.Filled.Restore, "Restore from backup", "Replaces everything in the app", onClick = { openBackup.launch(arrayOf("application/json", "*/*")) })
+                    SettingRow(Icons.Filled.Lock, "Encrypt backups", if (hasPw) "On — backups need your password to restore" else "Off — protect backup files with a password",
+                        trailing = { Switch(hasPw, { on -> if (on) pwDialog = true else { prefs.backupPassword = null; hasPw = false } }) })
                 }
             }
             SectionTitle("Automatic backup")
@@ -388,8 +398,47 @@ fun BackupScreen(back: () -> Unit) {
     restoreUri?.let { uri ->
         ConfirmDialog("Restore backup?", "All current data is replaced by the backup.", confirm = "Restore", onDismiss = { restoreUri = null }) {
             scope.launch {
-                try { Backup.readFrom(ctx, uri); toast("Restored") } catch (e: Exception) { toast("Restore failed: ${e.message}") }
+                try {
+                    val text = Backup.readText(ctx, uri)
+                    if (Backup.isEncrypted(text)) restoreText = text
+                    else { Backup.restoreText(text, null); toast("Restored") }
+                } catch (e: Exception) { toast("Restore failed: ${e.message}") }
             }
         }
+    }
+    restoreText?.let { text ->
+        var pw by remember { mutableStateOf(prefs.backupPassword.orEmpty()) }
+        AlertDialog(
+            onDismissRequest = { restoreText = null },
+            title = { Text("Backup password") },
+            text = { OutlinedTextField(pw, { pw = it }, label = { Text("Password") }, singleLine = true,
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()) },
+            confirmButton = {
+                TextButton(onClick = {
+                    restoreText = null
+                    scope.launch { try { Backup.restoreText(text, pw); toast("Restored") } catch (e: Exception) { toast("Restore failed: ${e.message}") } }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { restoreText = null }) { Text("Cancel") } },
+        )
+    }
+    if (pwDialog) {
+        var a by remember { mutableStateOf("") }
+        var b by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { pwDialog = false },
+            title = { Text("Backup password") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("You'll need this to restore. If you forget it, encrypted backups can't be opened.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(a, { a = it }, label = { Text("Password") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                    OutlinedTextField(b, { b = it }, label = { Text("Repeat") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = a.length >= 4 && a == b, onClick = { prefs.backupPassword = a; hasPw = true; pwDialog = false; toast("Backups will be encrypted") }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { pwDialog = false }) { Text("Cancel") } },
+        )
     }
 }

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rw_root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_bg" android:orientation="vertical" android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Spent today" android:textColor="@color/widget_sub" android:textSize="12sp" />
+            <TextView android:id="@+id/rw_today" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="@color/expense" android:textSize="20sp" android:textStyle="bold" />
+        </LinearLayout>
+        <ImageView android:id="@+id/rw_add" android:layout_width="42dp" android:layout_height="42dp" android:background="@drawable/widget_btn" android:padding="10dp" android:src="@drawable/ic_add_white" android:contentDescription="Add" />
+    </LinearLayout>
+    <TextView android:id="@+id/rw_budget" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textColor="@color/widget_sub" android:textSize="12sp" android:maxLines="1" android:ellipsize="end" />
+    <ProgressBar android:id="@+id/rw_bar" style="@android:style/Widget.ProgressBar.Horizontal" android:layout_width="match_parent" android:layout_height="6dp" android:layout_marginTop="4dp" android:max="100" android:progressTint="@color/brand" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Recent" android:textColor="@color/widget_sub" android:textSize="12sp" />
+        <LinearLayout android:id="@+id/r1" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp">
+            <TextView android:id="@+id/r1_t" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="@color/widget_text" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/r1_a" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textStyle="bold" android:textColor="@color/expense" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/r2" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp">
+            <TextView android:id="@+id/r2_t" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="@color/widget_text" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/r2_a" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textStyle="bold" android:textColor="@color/expense" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/r3" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp">
+            <TextView android:id="@+id/r3_t" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="@color/widget_text" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/r3_a" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textStyle="bold" android:textColor="@color/expense" />
+        </LinearLayout>
+</LinearLayout>

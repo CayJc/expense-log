@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,7 @@ fun CalendarTab(bd: BookData, hidden: Boolean, go: (String) -> Unit) {
     val txns by remember(bd.bookId, range) { Graph.dao.observeTxnsBetween(bd.bookId, range.start, range.end) }.collectAsStateWithLifecycle(emptyList())
     val byDay = remember(txns) { txns.groupBy { Dates.startOfDay(it.dateTime) } }
     val today = Dates.startOfDay(System.currentTimeMillis())
+    val eth = Graph.prefs.ethCal.collectAsState().value == 1
 
     // Build grid cells
     val first = Dates.cal(range.start)
@@ -72,7 +74,7 @@ fun CalendarTab(bd: BookData, hidden: Boolean, go: (String) -> Unit) {
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         item {
-            PeriodSwitcher(Dates.fmt("MMMM yyyy", anchor), onPrev = { anchor = Dates.shift(com.spacecay.expenselog.util.PeriodKind.MONTH, range.start, -1) },
+            PeriodSwitcher(Dates.fmt("MMMM yyyy", anchor) + (if (eth) "\n" + com.spacecay.expenselog.util.EthiopianCalendar.monthLabel(range.start) + " – " + com.spacecay.expenselog.util.EthiopianCalendar.monthLabel(range.end - 1) else ""), onPrev = { anchor = Dates.shift(com.spacecay.expenselog.util.PeriodKind.MONTH, range.start, -1) },
                 onNext = { anchor = Dates.shift(com.spacecay.expenselog.util.PeriodKind.MONTH, range.start, 1) }, modifier = Modifier.padding(horizontal = 8.dp))
         }
         item {
@@ -101,6 +103,7 @@ fun CalendarTab(bd: BookData, hidden: Boolean, go: (String) -> Unit) {
                                         ) {
                                             Text(Dates.fmt("d", day), style = MaterialTheme.typography.labelLarge,
                                                 fontWeight = if (day == today) FontWeight.Bold else FontWeight.Medium)
+                                            if (eth) Text(com.spacecay.expenselog.util.EthiopianCalendar.of(day).day.toString(), fontSize = 9.sp, color = MaterialTheme.colorScheme.primary)
                                             Spacer(Modifier.weight(1f))
                                             if (inc > 0 && !hidden) Text(Money.compact(inc), fontSize = 9.sp, color = m.income, maxLines = 1)
                                             if (exp > 0 && !hidden) Text(Money.compact(exp), fontSize = 9.sp, color = m.expense, maxLines = 1)
@@ -118,7 +121,7 @@ fun CalendarTab(bd: BookData, hidden: Boolean, go: (String) -> Unit) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(Dates.dayHeader(selected), style = MaterialTheme.typography.titleMedium)
-                    Text(Dates.fmt("EEEE, d MMMM yyyy", selected), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(Dates.fmt("EEEE, d MMMM yyyy", selected) + (if (eth) " · " + com.spacecay.expenselog.util.EthiopianCalendar.format(selected) else ""), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.Center) {
                     val inc = Stats.income(dayList, bd); val exp = Stats.expense(dayList, bd)

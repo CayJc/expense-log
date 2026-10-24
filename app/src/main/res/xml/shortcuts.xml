@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="add_expense" android:enabled="true"
+        android:icon="@drawable/ic_sc_expense" android:shortcutShortLabel="@string/sc_expense">
+        <intent android:action="android.intent.action.VIEW"
+            android:targetPackage="com.spacecay.expenselog"
+            android:targetClass="com.spacecay.expenselog.MainActivity">
+            <extra android:name="route" android:value="txedit?id=0&amp;type=0" />
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="add_income" android:enabled="true"
+        android:icon="@drawable/ic_sc_income" android:shortcutShortLabel="@string/sc_income">
+        <intent android:action="android.intent.action.VIEW"
+            android:targetPackage="com.spacecay.expenselog"
+            android:targetClass="com.spacecay.expenselog.MainActivity">
+            <extra android:name="route" android:value="txedit?id=0&amp;type=1" />
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="today" android:enabled="true"
+        android:icon="@drawable/ic_sc_today" android:shortcutShortLabel="@string/sc_today">
+        <intent android:action="android.intent.action.VIEW"
+            android:targetPackage="com.spacecay.expenselog"
+            android:targetClass="com.spacecay.expenselog.MainActivity">
+            <extra android:name="route" android:value="dailylog" />
+        </intent>
+    </shortcut>
+</shortcuts>

@@ -107,7 +107,7 @@ fun RecurringScreen(back: () -> Unit, go: (String) -> Unit) {
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(r.note.ifBlank { c?.name ?: if (r.type == TxType.TRANSFER) "Transfer" else "Recurring" }, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                            Text("${freqText(r)} · ${if (r.active) "next " + Dates.date(r.nextDate) else "paused"}", style = MaterialTheme.typography.bodySmall,
+                            Text("${freqText(r)}${if (r.confirm) " · reminder" else ""} · ${if (r.active) "next " + Dates.date(r.nextDate) else "paused"}", style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text(if (hidden) "••••" else Money.format(if (r.type == TxType.EXPENSE) -r.amount else r.amount, bd.currencyOf(r.walletId)),
@@ -174,6 +174,7 @@ fun RecurringEditScreen(id: Long, back: () -> Unit) {
     var start by remember { mutableLongStateOf(Dates.combine(System.currentTimeMillis(), 9, 0)) }
     var end by remember { mutableStateOf<Long?>(null) }
     var active by remember { mutableStateOf(true) }
+    var confirm by remember { mutableStateOf(false) }
     var pickStart by remember { mutableStateOf(false) }
     var pickEnd by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
@@ -181,7 +182,7 @@ fun RecurringEditScreen(id: Long, back: () -> Unit) {
     LaunchedEffect(id, bd.wallets.isNotEmpty()) {
         if (id != 0L && orig == null) Graph.dao.getRecurring(id)?.let { r ->
             orig = r; type = r.type; amount = Money.toInput(r.amount); walletId = r.walletId; toWalletId = r.toWalletId; categoryId = r.categoryId
-            note = r.note; freq = r.frequency; interval = r.interval.toString(); start = r.startDate; end = r.endDate; active = r.active
+            note = r.note; freq = r.frequency; interval = r.interval.toString(); start = r.startDate; end = r.endDate; active = r.active; confirm = r.confirm
         }
         if (walletId == null) walletId = bd.wallets.firstOrNull { !it.archived }?.id
     }
@@ -211,7 +212,15 @@ fun RecurringEditScreen(id: Long, back: () -> Unit) {
             if (id != 0L) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Active", Modifier.weight(1f)); Switch(active, { active = it })
             }
-            Text("Transactions are added automatically on each due date (including any missed while the phone was off).",
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Remind me first (bill)")
+                    Text("Get a notification with Add / Skip instead of logging it automatically", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(confirm, { confirm = it })
+            }
+            Text(if (confirm) "On the due date you'll be asked to add or skip it." else "Transactions are added automatically on each due date (including any missed while the phone was off).",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(
                 onClick = {
@@ -235,11 +244,12 @@ fun RecurringEditScreen(id: Long, back: () -> Unit) {
                     val r = (o ?: Recurring(bookId = bd.bookId, type = type, amount = a, walletId = w, startDate = start, nextDate = start)).copy(
                         type = type, amount = a, walletId = w, toWalletId = if (type == 2) toWalletId else null,
                         categoryId = if (type == 2) null else categoryId, note = note.trim(), frequency = freq, interval = iv,
-                        startDate = start, nextDate = next, endDate = end, active = active,
+                        startDate = start, nextDate = next, endDate = end, active = active, confirm = confirm,
                     )
                     scope.launch {
                         if (r.id == 0L) Graph.dao.insertRecurring(r) else Graph.dao.updateRecurring(r)
                         Graph.repo.runDueRecurring()
+                        Graph.repo.notifyDueBills(Graph.app)
                         back()
                     }
                 },

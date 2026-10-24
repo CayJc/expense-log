@@ -71,6 +71,38 @@ class Prefs(context: Context) {
     var cbeWalletId: Long
         get() = sp.getLong("cbeWallet", 0L)
         set(v) = sp.edit().putLong("cbeWallet", v).apply()
+    /** Wallet that payments from a provider (TELEBIRR, MPESA, CBE, BOA, APOLLO...) go into. 0 = auto. */
+    fun providerWallet(provider: String): Long = when (provider) {
+        "TELEBIRR" -> sp.getLong("wallet_TELEBIRR", telebirrWalletId)
+        "CBE" -> sp.getLong("wallet_CBE", cbeWalletId)
+        else -> sp.getLong("wallet_$provider", 0L)
+    }
+    fun setProviderWallet(provider: String, id: Long) {
+        sp.edit().putLong("wallet_$provider", id).apply()
+        if (provider == "TELEBIRR") telebirrWalletId = id
+        if (provider == "CBE") cbeWalletId = id
+    }
+
+    /** Last balance reported by a bank/telebirr message for a wallet: "amount|time". */
+    fun balanceCheck(walletId: Long): Pair<Long, Long>? =
+        sp.getString("bal_$walletId", null)?.split('|')?.let { p -> p.getOrNull(0)?.toLongOrNull()?.let { a -> a to (p.getOrNull(1)?.toLongOrNull() ?: 0L) } }
+    fun setBalanceCheck(walletId: Long, amount: Long, time: Long) { sp.edit().putString("bal_$walletId", "$amount|$time").apply() }
+
+    /** Read SMS from banks / M-PESA (only messages from known payment senders). */
+    var readSms: Boolean
+        get() = sp.getBoolean("readSms", true)
+        set(v) = sp.edit().putBoolean("readSms", v).apply()
+
+    // ----- Ethiopian calendar: 0 off, 1 show alongside -----
+    private val _ethCal = MutableStateFlow(sp.getInt("ethCal", 0))
+    val ethCal: StateFlow<Int> = _ethCal
+    fun setEthCal(v: Int) { sp.edit().putInt("ethCal", v).apply(); _ethCal.value = v }
+
+    // ----- Encrypted backups -----
+    var backupPassword: String?
+        get() = sp.getString("backupPw", null)
+        set(v) = sp.edit().putString("backupPw", v).apply()
+
     var lastScreenshotScan: Long
         get() = sp.getLong("lastShotScan", 0L)
         set(v) = sp.edit().putLong("lastShotScan", v).apply()
@@ -107,6 +139,10 @@ class Prefs(context: Context) {
             "com.combanketh.mobilebanking", // CBE Mobile
             "com.cbe.mobilebanking",
             "com.cbe.birr",
+            "com.boa.boaMobileBanking",      // Bank of Abyssinia (guesses; label match covers others)
+            "com.boa.apollo",
+            "et.safaricom.mpesa.lifestyle",  // M-PESA Ethiopia
+            "com.safaricom.mpesa.lifestyle",
         )
         val SMS_PACKAGES = setOf(
             "com.google.android.apps.messaging",

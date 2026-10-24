@@ -116,7 +116,7 @@ class Repo(private val ctx: Context, private val db: AppDatabase, val dao: AppDa
 
     suspend fun rates(bookId: Long = this.bookId): Rates = Rates.of(dao.getBook(bookId), dao.getRates(bookId))
 
-    fun refreshWidget() = SummaryWidget.requestUpdate(ctx)
+    fun refreshWidget() { SummaryWidget.requestUpdate(ctx); com.spacecay.expenselog.widget.RecentWidget.requestUpdate(ctx) }
 
     // ---------------- Books ----------------
     suspend fun createBook(name: String, currency: String, withWallets: Boolean): Long = db.withTransaction {
@@ -318,10 +318,42 @@ class Repo(private val ctx: Context, private val db: AppDatabase, val dao: AppDa
         return created
     }
 
+    // ---------------- Bill reminders (recurring with confirm = true) ----------------
+    suspend fun payBill(r: Recurring) {
+        dao.insertTxn(
+            Txn(bookId = r.bookId, type = r.type, amount = r.amount, walletId = r.walletId, toWalletId = r.toWalletId,
+                toAmount = r.toAmount, categoryId = r.categoryId, note = r.note, dateTime = r.nextDate,
+                source = TxSource.RECURRING, recurringId = r.id)
+        )
+        advanceBill(r)
+        refreshWidget()
+    }
+
+    suspend fun advanceBill(r: Recurring) {
+        val next = nextOccurrence(r, r.nextDate)
+        val ended = r.endDate != null && next > r.endDate
+        dao.updateRecurring(r.copy(nextDate = next, active = r.active && !ended))
+    }
+
+    suspend fun billTitle(r: Recurring): String =
+        r.note.ifBlank { r.categoryId?.let { dao.getCategory(it)?.name } ?: "Bill" }
+
+    suspend fun notifyDueBills(ctx: Context) {
+        val sp = ctx.getSharedPreferences("bills", Context.MODE_PRIVATE)
+        for (r in dao.getDueBills(System.currentTimeMillis())) {
+            val key = "n${r.id}"
+            if (sp.getLong(key, 0L) == r.nextDate) continue
+            sp.edit().putLong(key, r.nextDate).apply()
+            val cur = dao.getWallet(r.walletId)?.currency ?: "ETB"
+            com.spacecay.expenselog.work.Notifier.billDue(ctx, r, billTitle(r), Money.format(r.amount, cur))
+        }
+    }
+
     // ---------------- Auto-categorisation ----------------
-    suspend fun guessCategory(bookId: Long, text: String, type: Int): Long? {
+    suspend fun guessCategory(bookId: Long, text: String, type: Int, rulesOnly: Boolean = false): Long? {
         val lower = text.lowercase()
         dao.getRules(bookId).firstOrNull { it.keyword.isNotBlank() && lower.contains(it.keyword.lowercase()) }?.let { return it.categoryId }
+        if (rulesOnly) return null
         val cats = dao.getCategories(bookId).filter { it.type == (if (type == TxType.INCOME) CatType.INCOME else CatType.EXPENSE) }
         for ((k, name) in Seed.payeeHints) {
             if (lower.contains(k)) cats.firstOrNull { it.name.equals(name, true) }?.let { return it.id }

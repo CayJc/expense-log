@@ -298,6 +298,8 @@ fun RecordsTab(bd: BookData, hidden: Boolean, go: (String) -> Unit) {
                 }
             }
         }
+        item { BillsDueCard(bd, hidden) }
+        if (kind == PeriodKind.MONTH && System.currentTimeMillis() in range) item { InsightsCard(bd, hidden) }
         item { Spacer(Modifier.height(8.dp)) }
         if (txns.isEmpty()) item {
             EmptyState(Icons.AutoMirrored.Filled.ReceiptLong, "No transactions", "Tap + to add one, or turn on auto-log for telebirr and CBE.")

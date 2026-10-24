@@ -26,6 +26,7 @@ object Notifier {
     const val CH_LOG = "autolog"
     const val CH_BUDGET = "budget"
     const val CH_DAILY = "daily"
+    const val CH_BILLS = "bills"
 
     fun channels(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
@@ -33,6 +34,7 @@ object Notifier {
         nm.createNotificationChannel(NotificationChannel(CH_LOG, "Auto-logged payments", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CH_BUDGET, "Budget alerts", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CH_DAILY, "Daily summary", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_BILLS, "Bill reminders", NotificationManager.IMPORTANCE_HIGH))
     }
 
     private fun canPost(ctx: Context) =
@@ -106,4 +108,32 @@ object Notifier {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open(ctx, "dailylog", 3000)).setAutoCancel(true).build())
     }
+
+    fun balanceMismatch(ctx: Context, wallet: com.spacecay.expenselog.data.Wallet, reported: Long, inApp: Long) {
+        val text = "${wallet.name} says ${Money.format(reported, wallet.currency)}, the app shows ${Money.format(inApp, wallet.currency)}. A payment may be missing — tap to check or adjust."
+        post(ctx, 4000 + wallet.id.toInt(), NotificationCompat.Builder(ctx, CH_LOG)
+            .setSmallIcon(R.drawable.ic_add_white).setContentTitle("${wallet.name} balance doesn't match")
+            .setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(open(ctx, "wallet/${wallet.id}", 4000 + wallet.id.toInt())).setAutoCancel(true).build())
+    }
+
+    /** "Rent is due" with Add / Skip buttons. */
+    fun billDue(ctx: Context, r: com.spacecay.expenselog.data.Recurring, title: String, amountText: String) {
+        val id = 5000 + r.id.toInt()
+        fun action(act: String): PendingIntent = PendingIntent.getBroadcast(
+            ctx, id * 10 + act.length,
+            Intent(ctx, BillActionReceiver::class.java).setAction(act).putExtra("rid", r.id).putExtra("due", r.nextDate),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        post(ctx, id, NotificationCompat.Builder(ctx, CH_BILLS)
+            .setSmallIcon(R.drawable.ic_add_white)
+            .setContentTitle("Bill due: $title")
+            .setContentText("$amountText · ${Dates.date(r.nextDate)}")
+            .setContentIntent(open(ctx, "home", id))
+            .addAction(0, "Add it", action(BillActionReceiver.ADD))
+            .addAction(0, "Skip", action(BillActionReceiver.SKIP))
+            .setAutoCancel(true).build())
+    }
+
+    fun cancel(ctx: Context, id: Int) { NotificationManagerCompat.from(ctx).cancel(id) }
 }

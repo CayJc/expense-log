@@ -74,7 +74,7 @@ interface AppDao {
         """
         SELECT w.id AS walletId,
           COALESCE((SELECT SUM(CASE WHEN t.type = 1 THEN t.amount
-                                    WHEN t.type = 0 THEN -t.amount
+                                    WHEN t.type = 0 THEN -(t.amount + t.fee)
                                     ELSE -(t.amount + t.fee) END)
                     FROM transactions t WHERE t.walletId = w.id), 0)
           + COALESCE((SELECT SUM(COALESCE(t2.toAmount, t2.amount))
@@ -88,7 +88,7 @@ interface AppDao {
         """
         SELECT w.id AS walletId,
           COALESCE((SELECT SUM(CASE WHEN t.type = 1 THEN t.amount
-                                    WHEN t.type = 0 THEN -t.amount
+                                    WHEN t.type = 0 THEN -(t.amount + t.fee)
                                     ELSE -(t.amount + t.fee) END)
                     FROM transactions t WHERE t.walletId = w.id), 0)
           + COALESCE((SELECT SUM(COALESCE(t2.toAmount, t2.amount))
@@ -168,6 +168,25 @@ interface AppDao {
 
     @Query("SELECT COUNT(*) FROM transactions WHERE bookId = :bookId AND amount = :amount AND type = :type AND dateTime BETWEEN :from AND :to")
     suspend fun countSimilar(bookId: Long, amount: Long, type: Int, from: Long, to: Long): Int
+
+    /** An auto-logged payment without a reference that matches (used to merge app + SMS copies of one payment). */
+    @Query("SELECT * FROM transactions WHERE bookId = :bookId AND amount = :amount AND type = :type AND dateTime BETWEEN :from AND :to ORDER BY ABS(dateTime - :at) LIMIT 1")
+    suspend fun findSimilar(bookId: Long, amount: Long, type: Int, from: Long, to: Long, at: Long): Txn?
+
+    @Query("SELECT categoryId FROM transactions WHERE bookId = :bookId AND payee != '' AND LOWER(payee) = LOWER(:payee) AND categoryId IS NOT NULL AND reviewed = 1 GROUP BY categoryId ORDER BY COUNT(*) DESC LIMIT 1")
+    suspend fun topCategoryForPayee(bookId: Long, payee: String): Long?
+
+    @Query("SELECT * FROM transactions WHERE bookId = :bookId AND type = :type AND categoryId IS NOT NULL AND reviewed = 1 AND amount BETWEEN :lo AND :hi AND dateTime > :since")
+    suspend fun similarAmounts(bookId: Long, type: Int, lo: Long, hi: Long, since: Long): List<Txn>
+
+    @Query("SELECT * FROM transactions WHERE bookId = :bookId ORDER BY dateTime DESC, id DESC LIMIT :n")
+    suspend fun latestTxns(bookId: Long, n: Int): List<Txn>
+
+    @Query("SELECT * FROM transactions WHERE splitId = :splitId ORDER BY id")
+    fun observeSplit(splitId: Long): Flow<List<Txn>>
+
+    @Query("SELECT * FROM recurring WHERE active = 1 AND confirm = 1 AND nextDate <= :now")
+    fun observeDueBills(now: Long): Flow<List<Recurring>>
 
     @Query("SELECT * FROM transactions WHERE bookId = :bookId AND reviewed = 0 ORDER BY dateTime DESC")
     fun observeUnreviewed(bookId: Long): Flow<List<Txn>>
@@ -275,8 +294,11 @@ interface AppDao {
     @Query("SELECT * FROM recurring WHERE bookId = :bookId ORDER BY active DESC, nextDate")
     fun observeRecurring(bookId: Long): Flow<List<Recurring>>
 
-    @Query("SELECT * FROM recurring WHERE active = 1 AND nextDate <= :now")
+    @Query("SELECT * FROM recurring WHERE active = 1 AND confirm = 0 AND nextDate <= :now")
     suspend fun getDueRecurring(now: Long): List<Recurring>
+
+    @Query("SELECT * FROM recurring WHERE active = 1 AND confirm = 1 AND nextDate <= :now")
+    suspend fun getDueBills(now: Long): List<Recurring>
 
     @Query("SELECT * FROM recurring WHERE id = :id")
     suspend fun getRecurring(id: Long): Recurring?

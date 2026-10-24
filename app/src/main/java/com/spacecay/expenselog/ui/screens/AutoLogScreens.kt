@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -113,9 +114,9 @@ fun AutoLogScreen(back: () -> Unit, go: (String) -> Unit) {
     var watched by remember { mutableStateOf(prefs.watchedPackages) }
     var lastScan by remember { mutableLongStateOf(prefs.lastScreenshotScan) }
     var scanning by remember { mutableStateOf(false) }
-    var pickFor by remember { mutableStateOf(0) } // 1 telebirr, 2 cbe
-    var tele by remember { mutableLongStateOf(prefs.telebirrWalletId) }
-    var cbe by remember { mutableLongStateOf(prefs.cbeWalletId) }
+    var pickFor by remember { mutableStateOf<com.spacecay.expenselog.autolog.Provider?>(null) }
+    var mapping by remember { mutableStateOf(com.spacecay.expenselog.autolog.Provider.entries.associateWith { prefs.providerWallet(it.name) }) }
+    var sms by remember { mutableStateOf(prefs.readSms) }
     var test by remember { mutableStateOf("") }
     val rules by remember(bd.bookId) { Graph.dao.observeRules(bd.bookId) }.collectAsStateWithLifecycle(emptyList())
 
@@ -126,7 +127,7 @@ fun AutoLogScreen(back: () -> Unit, go: (String) -> Unit) {
             Text("Payments are logged automatically and marked for review so you can confirm the category.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(4.dp))
 
-            SectionTitle("From notifications (telebirr)")
+            SectionTitle("From notifications & SMS (telebirr, M-PESA, banks)")
             AppCard(padding = PaddingValues(4.dp)) {
                 Column {
                     SettingRow(
@@ -140,6 +141,10 @@ fun AutoLogScreen(back: () -> Unit, go: (String) -> Unit) {
                         Switch(notifOn, { prefs.autoLogNotifications = it; notifOn = it })
                     })
                 }
+            }
+            AppCard(padding = PaddingValues(4.dp)) {
+                SettingRow(Icons.Filled.Sms, "Read payment SMS", "Only from M-PESA, telebirr (127), CBE, Abyssinia, Apollo — other texts are ignored",
+                    trailing = { Switch(sms, { prefs.readSms = it; sms = it }) })
             }
             SectionTitle("Apps to read")
             AppCard(padding = PaddingValues(4.dp)) {
@@ -168,7 +173,7 @@ fun AutoLogScreen(back: () -> Unit, go: (String) -> Unit) {
                 }
             }
 
-            SectionTitle("From screenshots (CBE, telebirr packages)")
+            SectionTitle("From screenshots (CBE, Abyssinia, Apollo, telebirr)")
             AppCard(padding = PaddingValues(4.dp)) {
                 Column {
                     if (!shotPerm) SettingRow(Icons.Filled.ErrorOutline, "Allow access to photos", "Needed to read new screenshots", iconColor = m.expense,
@@ -198,11 +203,13 @@ fun AutoLogScreen(back: () -> Unit, go: (String) -> Unit) {
             SectionTitle("Which wallet")
             AppCard(padding = PaddingValues(12.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val tw = bd.walletMap[tele]; val cw = bd.walletMap[cbe]
-                    PickerField("telebirr payments go to", tw?.name ?: "Auto", tw?.let { AppIcons.get(it.icon) } ?: Icons.Filled.AccountBalanceWallet,
-                        tw?.let { Color(it.color) } ?: MaterialTheme.colorScheme.primary, onClick = { pickFor = 1 })
-                    PickerField("CBE payments go to", cw?.name ?: "Auto", cw?.let { AppIcons.get(it.icon) } ?: Icons.Filled.AccountBalanceWallet,
-                        cw?.let { Color(it.color) } ?: MaterialTheme.colorScheme.primary, onClick = { pickFor = 2 })
+                    com.spacecay.expenselog.autolog.Provider.entries.filter { it != com.spacecay.expenselog.autolog.Provider.OTHER }.forEach { pr ->
+                        val w = bd.walletMap[mapping[pr] ?: 0L]
+                        PickerField("${pr.label} payments go to", w?.name ?: "Auto (created when first used)", w?.let { AppIcons.get(it.icon) } ?: Icons.Filled.AccountBalanceWallet,
+                            w?.let { Color(it.color) } ?: MaterialTheme.colorScheme.primary, onClick = { pickFor = pr })
+                    }
+                    Text("Payments in another currency (e.g. Apollo USD) go to a wallet in that currency, created automatically if needed.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             AppCard(padding = PaddingValues(4.dp)) {
@@ -254,9 +261,10 @@ fun AutoLogScreen(back: () -> Unit, go: (String) -> Unit) {
             Spacer(Modifier.height(24.dp))
         }
     }
-    if (pickFor != 0) WalletPickerSheet(bd, if (pickFor == 1) tele else cbe, onDismiss = { pickFor = 0 }) { w ->
+    pickFor?.let { pr -> WalletPickerSheet(bd, mapping[pr], onDismiss = { pickFor = null }) { w ->
         val id = w?.id ?: 0L
-        if (pickFor == 1) { prefs.telebirrWalletId = id; tele = id } else { prefs.cbeWalletId = id; cbe = id }
+        prefs.setProviderWallet(pr.name, id); mapping = mapping + (pr to id)
+    }
     }
 }
 

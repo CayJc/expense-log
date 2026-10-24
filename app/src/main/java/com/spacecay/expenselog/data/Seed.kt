@@ -57,6 +57,10 @@ object Seed {
 
     val payeeHints: Map<String, String> = mapOf(
         "airtime" to "Airtime",
+        "topup" to "Airtime",
+        "top up" to "Airtime",
+        "recharge" to "Airtime",
+        "bundle" to "Data package",
         "package" to "Data package",
         "data" to "Data package",
         "ethio telecom" to "Airtime & Data",

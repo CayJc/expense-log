@@ -61,7 +61,8 @@ class PaymentNotificationListener : NotificationListenerService() {
         val label = try {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString().lowercase()
         } catch (_: Exception) { "" }
-        return "telebirr" in p || "telebirr" in label || "cbe" in p || "combanketh" in p || "cbe" in label || "commercial bank" in label
+        return listOf("telebirr", "cbe", "combanketh", "mpesa", "m-pesa", "abyssinia", "apollo", "boa").any { it in p || it in label } ||
+            "commercial bank" in label
     }
 
     private fun handle(n: StatusBarNotification) {
@@ -75,8 +76,9 @@ class PaymentNotificationListener : NotificationListenerService() {
         if (pkg !in seen) prefs.seenPackages = (seen + pkg).toList().takeLast(40).toSet()
 
         if (!prefs.autoLogNotifications) return
-        val paymentApp = isPaymentApp(pkg)
-        if (pkg !in prefs.watchedPackages && !paymentApp) return
+        val isSms = pkg in Prefs.SMS_PACKAGES || pkg.contains("messaging") || pkg.contains("mms")
+        val paymentApp = !isSms && isPaymentApp(pkg)
+        if (!isSms && pkg !in prefs.watchedPackages && !paymentApp) return
 
         val notif = n.notification ?: return
         if ((notif.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
@@ -90,12 +92,22 @@ class PaymentNotificationListener : NotificationListenerService() {
         val text = parts.joinToString(" ").trim()
         if (text.isEmpty()) return
 
+        // SMS: only messages whose sender looks like a bank / mobile money service.
+        var trusted = paymentApp
+        if (isSms) {
+            if (!prefs.readSms) return
+            val sender = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.lowercase()?.trim().orEmpty()
+            val known = PaymentParser.trustedSenders.any { s -> sender == s || sender.startsWith(s) || sender.contains(s) && s.length > 3 }
+            if (!known && pkg !in prefs.watchedPackages) return
+            trusted = known
+        }
+
         // Same notification often gets re-posted (updates); skip exact repeats.
         val key = pkg + text.hashCode()
         if (key in recent) return
         recent.addLast(key); if (recent.size > 30) recent.removeFirst()
 
-        val parsed = PaymentParser.parse(text, pkg, trusted = paymentApp) ?: return
+        val parsed = PaymentParser.parse(text, pkg, trusted = trusted) ?: return
         Graph.scope.launch {
             try {
                 Graph.repo.ensureSeeded()

@@ -141,7 +141,7 @@ fun TxDetailScreen(id: Long, back: () -> Unit, go: (String) -> Unit) {
                             if (!linked) DetailLine("Category", bd.categoryLabel(tx.categoryId))
                             DetailLine("Wallet", bd.walletMap[tx.walletId]?.name ?: "—")
                         }
-                        DetailLine("Date", Dates.fmt("EEEE, d MMMM yyyy · HH:mm", tx.dateTime))
+                        DetailLine("Date", Dates.fmt("EEEE, d MMMM yyyy · HH:mm", tx.dateTime) + (if (Graph.prefs.ethCal.value == 1) "\n" + com.spacecay.expenselog.util.EthiopianCalendar.format(tx.dateTime) + " (E.C.)" else ""))
                         if (tx.fee > 0) DetailLine("Service fee", Money.format(tx.fee, code))
                         if (tx.payee.isNotBlank()) DetailLine(if (tx.type == TxType.INCOME) "From" else "Paid to", tx.payee)
                         if (tx.note.isNotBlank()) DetailLine("Note", tx.note)
@@ -155,6 +155,21 @@ fun TxDetailScreen(id: Long, back: () -> Unit, go: (String) -> Unit) {
                             else -> "You"
                         })
                         tx.ref?.let { DetailLine("Reference", it) }
+                    }
+                }
+            }
+            val sid = tx.splitId
+            if (sid != null) item {
+                val parts by remember(sid) { Graph.dao.observeSplit(sid) }.collectAsStateWithLifecycle(emptyList())
+                AppCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Split transaction · total ${Money.format(parts.sumOf { it.amount + it.fee }, code)}", style = MaterialTheme.typography.titleSmall)
+                        parts.forEach { p ->
+                            Row(Modifier.fillMaxWidth().clickable { if (p.id != tx.id) go("tx/${p.id}") }) {
+                                Text(bd.categoryLabel(p.categoryId) + if (p.id == tx.id) "  (this)" else "", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                Text(Money.format(p.amount, code), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
             }

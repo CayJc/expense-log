@@ -1,5 +1,6 @@
 package com.spacecay.expenselog.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -118,6 +119,8 @@ data class Txn(
     val reviewed: Boolean = true,
     val excludeFromStats: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
+    /** Transactions created together by "Split" share this id (the first part's id). */
+    val splitId: Long? = null,
 )
 
 object BudgetPeriod {
@@ -235,6 +238,8 @@ data class Recurring(
     val nextDate: Long,
     val endDate: Long? = null,
     val active: Boolean = true,
+    /** Bill reminder: ask before adding instead of logging silently. */
+    @ColumnInfo(defaultValue = "0") val confirm: Boolean = false,
 )
 
 @Entity(tableName = "templates", indices = [Index("bookId")])

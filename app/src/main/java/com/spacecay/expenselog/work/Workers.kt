@@ -22,6 +22,7 @@ class PeriodicWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         Graph.init(applicationContext)
         try { Graph.repo.ensureSeeded() } catch (_: Exception) {}
         try { Graph.repo.runDueRecurring() } catch (_: Exception) {}
+        try { Graph.repo.notifyDueBills(applicationContext) } catch (_: Exception) {}
         try { ScreenshotScanner.scan(applicationContext) } catch (_: Exception) {}
         try { Backup.autoBackupIfDue(applicationContext) } catch (_: Exception) {}
         return Result.success()

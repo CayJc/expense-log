@@ -138,6 +138,10 @@ fun TxEditScreen(
 
     var pickWallet by remember { mutableStateOf(0) } // 0 none, 1 from, 2 to
     var pickCategory by remember { mutableStateOf(false) }
+    // Split: extra parts (category + amount); whatever is left stays on the main category.
+    val splitCats = remember { mutableStateListOf<Long?>() }
+    val splitAmts = remember { mutableStateListOf<String>() }
+    var pickSplitIdx by remember { mutableStateOf(-1) }
     var pickDate by remember { mutableStateOf(false) }
     var pickTime by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -196,6 +200,7 @@ fun TxEditScreen(
     val category = categoryId?.let { bd.catMap[it] }
     // Drop a category that doesn't match the type
     LaunchedEffect(type) {
+        if (loaded) { splitCats.clear(); splitAmts.clear() }
         val c = categoryId?.let { bd.catMap[it] }
         if (type == TxType.TRANSFER || (c != null && c.type != (if (type == TxType.INCOME) CatType.INCOME else CatType.EXPENSE))) categoryId = null
     }
@@ -222,11 +227,17 @@ fun TxEditScreen(
         val fee = Money.parse(feeText) ?: 0L
         val toAmt = if (crossCurrency) Money.parse(toAmountText) else null
         val base = original
+        val partSum = splitAmts.sumOf { Money.parse(it) ?: 0L }
+        val splitting = id == 0L && type != TxType.TRANSFER && splitAmts.isNotEmpty()
+        if (splitting) {
+            if (splitAmts.any { (Money.parse(it) ?: 0L) <= 0L } || splitCats.any { it == null }) { error = "Give every split part a category and an amount"; return }
+            if (partSum >= amt) { error = "Split parts add up to more than the total"; return }
+        }
         val t = Txn(
             id = base?.id ?: 0L,
             bookId = base?.bookId ?: bd.bookId,
             type = type,
-            amount = amt,
+            amount = if (splitting) amt - partSum else amt,
             walletId = w.id,
             toWalletId = if (type == TxType.TRANSFER) toWallet?.id else null,
             toAmount = toAmt,
@@ -246,7 +257,15 @@ fun TxEditScreen(
             createdAt = base?.createdAt ?: System.currentTimeMillis(),
         )
         scope.launch {
-            Graph.repo.saveTxn(t)
+            val mainId = Graph.repo.saveTxn(t)
+            if (splitting) {
+                Graph.dao.updateTxn(t.copy(id = mainId, splitId = mainId))
+                splitCats.forEachIndexed { i, c ->
+                    Graph.dao.insertTxn(t.copy(id = 0, amount = Money.parse(splitAmts[i]) ?: 0L, categoryId = c, fee = 0, photos = "", ref = null, splitId = mainId))
+                }
+                Graph.repo.refreshWidget()
+                splitCats.clear(); splitAmts.clear()
+            }
             // Learn: auto-logged payee -> chosen category
             val cat = t.categoryId
             if (cat != null && t.payee.isNotBlank() && t.source != TxSource.MANUAL) {
@@ -350,6 +369,25 @@ fun TxEditScreen(
                     category?.let { AppIcons.get(it.icon) } ?: Icons.Filled.HelpOutline,
                     category?.let { Color(it.color) } ?: MaterialTheme.colorScheme.onSurfaceVariant,
                     onClick = { showPad = false; pickCategory = true })
+                if (id == 0L) {
+                    splitCats.indices.forEach { i ->
+                        val sc = splitCats[i]?.let { bd.catMap[it] }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PickerField("Split part ${i + 2}", sc?.let { bd.categoryLabel(it.id) } ?: "Category", sc?.let { AppIcons.get(it.icon) } ?: Icons.Filled.HelpOutline,
+                                sc?.let { Color(it.color) } ?: MaterialTheme.colorScheme.onSurfaceVariant, onClick = { showPad = false; pickSplitIdx = i }, modifier = Modifier.weight(1.2f))
+                            MoneyField(splitAmts[i], { splitAmts[i] = it }, "Amount", code, Modifier.weight(1f))
+                            IconButton(onClick = { splitCats.removeAt(i); splitAmts.removeAt(i) }) { Icon(Icons.Filled.Close, "Remove part") }
+                        }
+                    }
+                    if (splitAmts.isNotEmpty()) {
+                        val rest = amountCents - splitAmts.sumOf { Money.parse(it) ?: 0L }
+                        Text("${category?.name ?: "Main category"} gets the rest: ${Money.format(rest, code)}",
+                            style = MaterialTheme.typography.bodySmall, color = if (rest > 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(onClick = { showPad = false; splitCats.add(null); splitAmts.add(""); pickSplitIdx = splitCats.size - 1 }) {
+                        Text(if (splitAmts.isEmpty()) "Split into several categories" else "+ Add another part")
+                    }
+                }
                 PickerField("Wallet", wallet?.let { "${it.name} · ${it.currency}" } ?: "Choose wallet", wallet?.let { AppIcons.get(it.icon) } ?: Icons.Filled.AccountBalanceWallet,
                     wallet?.let { Color(it.color) } ?: MaterialTheme.colorScheme.primary, onClick = { showPad = false; pickWallet = 1 })
             }
@@ -420,6 +458,11 @@ fun TxEditScreen(
     if (pickCategory) {
         CategoryPickerSheet(bd, if (type == TxType.INCOME) CatType.INCOME else CatType.EXPENSE, categoryId,
             onDismiss = { pickCategory = false }, onManage = onManageCategories) { categoryId = it.id }
+    }
+    if (pickSplitIdx >= 0 && pickSplitIdx < splitCats.size) {
+        val idx = pickSplitIdx
+        CategoryPickerSheet(bd, if (type == TxType.INCOME) CatType.INCOME else CatType.EXPENSE, splitCats[idx],
+            onDismiss = { pickSplitIdx = -1 }) { splitCats[idx] = it.id }
     }
     if (pickDate) DateDialog(dateTime, { pickDate = false }) { d ->
         val c = Dates.cal(dateTime); dateTime = Dates.combine(d, c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE))
