@@ -1,0 +1,9 @@
+<resources>
+    <color name="bg">#F4F5F9</color>
+    <color name="brand">#2F5BEA</color>
+    <color name="widget_bg">#FFFFFFFF</color>
+    <color name="widget_text">#FF1B1E28</color>
+    <color name="widget_sub">#FF6B7080</color>
+    <color name="expense">#E5484D</color>
+    <color name="income">#2E9E6A</color>
+</resources>
