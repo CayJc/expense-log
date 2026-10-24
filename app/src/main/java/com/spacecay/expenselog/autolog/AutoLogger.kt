@@ -31,14 +31,7 @@ object AutoLogger {
         val chosen = wallets.firstOrNull { it.id == prefs.providerWallet(provider.name) }
         if (chosen != null && (chosen.currency == currency || !create)) return chosen.id
 
-        val keys = when (provider) {
-            Provider.TELEBIRR -> listOf("tele")
-            Provider.MPESA -> listOf("m-pesa", "mpesa")
-            Provider.CBE -> listOf("cbe", "commercial")
-            Provider.BOA -> listOf("abyssinia", "boa")
-            Provider.APOLLO -> listOf("apollo")
-            Provider.OTHER -> emptyList()
-        }
+        val keys = providerKeys(provider)
         val named = wallets.filter { w -> keys.any { w.name.contains(it, ignoreCase = true) } }
         named.firstOrNull { it.currency == currency }?.let { return it.id }
         if (provider == Provider.OTHER) return chosen?.id ?: wallets.firstOrNull()?.id
@@ -55,6 +48,15 @@ object AutoLogger {
         if (currency != main && Graph.dao.getRates(bookId).none { it.code == currency }) Graph.repo.setRate(bookId, currency, 1.0)
         if (chosen == null && currency == "ETB") prefs.setProviderWallet(provider.name, id)
         return id
+    }
+
+    fun providerKeys(provider: Provider): List<String> = when (provider) {
+        Provider.TELEBIRR -> listOf("tele")
+        Provider.MPESA -> listOf("m-pesa", "mpesa")
+        Provider.CBE -> listOf("cbe", "commercial")
+        Provider.BOA -> listOf("abyssinia", "boa")
+        Provider.APOLLO -> listOf("apollo")
+        Provider.OTHER -> emptyList()
     }
 
     /**
@@ -93,6 +95,24 @@ object AutoLogger {
             note = listOf(note, "${p.currency} ${Money.plain(p.amount)}").filter { it.isNotBlank() }.joinToString(" · ")
         }
         if (p.selfTransfer) note = listOf(note, "Transfer between your accounts — edit to pick the other wallet").filter { it.isNotBlank() }.joinToString(" · ")
+
+        // Own-account move: if the provider has exactly one other wallet (e.g. Apollo USD → Apollo ETB), log a transfer.
+        if (p.selfTransfer) {
+            val keys = providerKeys(p.provider)
+            val others = Graph.dao.getWallets(bookId).filter { w -> !w.archived && w.id != walletId && keys.any { w.name.contains(it, ignoreCase = true) } }
+            if (others.size == 1) {
+                val to = others.first()
+                val rates = Graph.repo.rates(bookId)
+                val id = Graph.repo.saveTxn(
+                    Txn(bookId = bookId, type = TxType.TRANSFER, amount = amount, walletId = walletId, toWalletId = to.id,
+                        toAmount = if (to.currency != wallet.currency) rates.convert(amount, wallet.currency, to.currency) else null,
+                        fee = fee, note = p.provider.label, payee = "", dateTime = p.time ?: System.currentTimeMillis(),
+                        photos = photo ?: "", source = source, ref = p.ref, reviewed = false)
+                )
+                if (notify) Notifier.logged(ctx, id, p)
+                return id
+            }
+        }
 
         val cat = if (p.selfTransfer) null else guessCategory(bookId, p.payee, p.raw, p.type, amount, p.time ?: System.currentTimeMillis())
         val id = Graph.repo.saveTxn(
