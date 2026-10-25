@@ -67,9 +67,7 @@ object ScreenshotScanner {
             if (!AutoLogger.looksLikePayment(text)) continue
             val parsed = PaymentParser.parse(text, null, fromScreenshot = true) ?: continue
             val withTime = if (parsed.time == null) parsed.copy(time = added) else parsed
-            if (AutoLogger.isDuplicate(withTime, prefs.bookId.value)) continue
-            val photo = AutoLogger.keepPhoto(ctx, uri)
-            if (AutoLogger.log(ctx, withTime, TxSource.SCREENSHOT, photo) != null) logged++
+            if (AutoLogger.log(ctx, withTime, TxSource.SCREENSHOT, { AutoLogger.keepPhoto(ctx, uri) }) != null) logged++
         }
         prefs.lastScreenshotScan = maxOf(newest, System.currentTimeMillis() - 60_000L).coerceAtLeast(since)
         Result(shots.size, logged)

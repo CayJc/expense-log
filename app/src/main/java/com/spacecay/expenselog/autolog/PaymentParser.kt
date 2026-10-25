@@ -57,7 +57,7 @@ object PaymentParser {
     private val vatRx = Regex("(?:VAT)[^0-9]{0,30}?$NUM", RegexOption.IGNORE_CASE)
     private val balanceRx = Regex("balance[^0-9]{0,40}?$NUM", RegexOption.IGNORE_CASE)
     private val refRx = Regex(
-        "(?:transaction\\s*(?:number|no\\.?|id|ref(?:erence)?)\\b|trans\\.?\\s*id|txn\\s*id|\\bref(?:erence)?\\s*(?:no\\.?|number|id)?\\b|receipt\\s*(?:no\\.?|number))\\s*(?:is)?\\s*[:#.\\-]?\\s*([A-Z0-9]{6,24})",
+        "(?:transaction\\s*(?:number|no\\.?|id|ref(?:erence)?)\\b|trans\\.?\\s*id|txn\\s*id|\\bref(?:erence)?\\s*(?:no\\.?|number|id)?\\b|receipt\\s*(?:no\\.?|number))\\s*(?:is)?[\\s:#.\\-]*([A-Z0-9]{6,24})",
         RegexOption.IGNORE_CASE,
     )
     private val ftRx = Regex("\\b(FT[0-9A-Z]{8,})\\b")
@@ -66,12 +66,12 @@ object PaymentParser {
     /** 2026/10/24 14:22:10 */
     private val dateRx2 = Regex("(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})[ T,]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?")
 
-    private val srcNameRx = Regex("source\\s*account\\s*name\\s*[:\\-]?\\s*([A-Za-z][A-Za-z .'\\-]{2,60})", RegexOption.IGNORE_CASE)
-    private val dstNameRx = Regex("(?:destination|receiver|beneficiary|credited)\\s*account\\s*name\\s*[:\\-]?\\s*([A-Za-z][A-Za-z .'\\-]{2,60})", RegexOption.IGNORE_CASE)
+    private val srcNameRx = Regex("source\\s*account\\s*name[\\s:\\-]*([A-Za-z][A-Za-z .'\\-]{2,60})", RegexOption.IGNORE_CASE)
+    private val dstNameRx = Regex("(?:destination|receiver|beneficiary|credited)\\s*account\\s*name[\\s:\\-]*([A-Za-z][A-Za-z .'\\-]{2,60})", RegexOption.IGNORE_CASE)
 
     private val payeePatterns = listOf(
         // 0: labelled fields on receipts
-        Regex("(?:transaction\\s*to|destination\\s*account\\s*name|credited\\s*party(?:\\s*name)?|receiver(?:\\s*name)?|recipient(?:\\s*name)?|beneficiary(?:\\s*name)?|merchant(?:\\s*name)?|paid\\s*to)\\s*[:\\-]?\\s*([A-Za-z][A-Za-z .&'\\-]{2,40})", RegexOption.IGNORE_CASE),
+        Regex("(?:transaction\\s*to|destination\\s*account\\s*name|credited\\s*party(?:\\s*name)?|receiver(?:\\s*name)?|recipient(?:\\s*name)?|beneficiary(?:\\s*name)?|merchant(?:\\s*name)?|paid\\s*to)[\\s:\\-]*([A-Za-z][A-Za-z .&'\\-]{2,40})", RegexOption.IGNORE_CASE),
         // 1
         Regex("(?:goods\\s+purchased\\s+from|purchased\\s+from|paid\\s+for\\s+goods\\s+from)\\s+(?:[0-9]+\\s*-\\s*)?([^.,\\n]{2,40}?)(?=\\s+on\\s|\\s*[.,(]|$)", RegexOption.IGNORE_CASE),
         // 2
@@ -79,13 +79,13 @@ object PaymentParser {
         // 3
         Regex("\\bfrom\\s+([A-Za-z][^.,\\n(]{1,40}?)(?=\\s*\\(|\\s+on\\s|\\s+at\\s|\\s+account|\\s+with\\s|\\s*[.,]|$)", RegexOption.IGNORE_CASE),
         // 4
-        Regex("(?:sender(?:\\s*name)?|debited\\s*party|from\\s*account\\s*name)\\s*[:\\-]?\\s*([A-Za-z][A-Za-z .&'\\-]{2,40})", RegexOption.IGNORE_CASE),
+        Regex("(?:sender(?:\\s*name)?|debited\\s*party|from\\s*account\\s*name)[\\s:\\-]*([A-Za-z][A-Za-z .&'\\-]{2,40})", RegexOption.IGNORE_CASE),
         // 5
         Regex("\\bfor\\s+(?!goods|airtime|the\\b|your\\b)([A-Za-z][A-Za-z .'\\-]{2,40}?)(?=\\s*\\n|\\s+on\\s|\\s*[.,(]|$)", RegexOption.IGNORE_CASE),
         // 6: "bought a Safaricom bundle of 5.00" / "bought a package Daily Data Package worth 5.00"
         Regex("bought\\s+(?:a\\s+)?(?:package\\s+)?([A-Za-z][A-Za-z .'\\-]{2,40}?)\\s+(?:of|worth|for)\\b", RegexOption.IGNORE_CASE),
         // 7: receipt "Transaction Type : Ethiotelecom Topup"
-        Regex("transaction\\s*type\\s*[:\\-]?\\s*([A-Za-z][A-Za-z .&'\\-]{2,40})", RegexOption.IGNORE_CASE),
+        Regex("transaction\\s*type[\\s:\\-]*([A-Za-z][A-Za-z .&'\\-]{2,40})", RegexOption.IGNORE_CASE),
     )
 
     private val reject = listOf(
@@ -104,6 +104,8 @@ object PaymentParser {
             "abyssinia" in l || "boa" in p || "abyssinia" in p || Regex("\\bboa\\b").containsMatchIn(l) -> Provider.BOA
             "m-pesa" in l || "mpesa" in l || "mpesa" in p || "safaricom" in p -> Provider.MPESA
             "telebirr" in l || "ethiopay" in p || "telebirr" in p || "e-money" in l -> Provider.TELEBIRR
+            // telebirr receipt screen: "-16.00 (ETB)", "Transaction To", "Transaction Number"
+            "(etb)" in l || "transfer money success" in l || ("transaction to" in l && "transaction number" in l) -> Provider.TELEBIRR
             "cbe" in l || "commercial bank" in l || p.contains("cbe") || p.contains("combanketh") -> Provider.CBE
             ftRx.containsMatchIn(text) -> Provider.CBE
             "ethio telecom" in l -> Provider.TELEBIRR
@@ -163,7 +165,7 @@ object PaymentParser {
         val payee = when {
             selfTransfer -> "Own account"
             else -> findPayee(input, type).ifBlank { findPayee(text, type) }
-                .ifBlank { Regex("transaction\\s*type\\s*[:\\-]?\\s*([A-Za-z][A-Za-z .&'\\-]{2,40})", RegexOption.IGNORE_CASE).find(input)?.groupValues?.get(1)?.let { clean(it) }.orEmpty() }
+                .ifBlank { Regex("transaction\\s*type[\\s:\\-]*([A-Za-z][A-Za-z .&'\\-]{2,40})", RegexOption.IGNORE_CASE).find(input)?.groupValues?.get(1)?.let { clean(it) }.orEmpty() }
                 .ifBlank { if ("airtime" in lower) "Airtime" else if ("package" in lower || "bundle" in lower) "Package" else "" }
         }
         val time = parseTime(text)
@@ -205,7 +207,7 @@ object PaymentParser {
             val m = payeePatterns[i].find(text) ?: continue
             val v = clean(m.groupValues[1])
             val lv = v.lowercase()
-            if (v.length >= 2 && !lv.startsWith("your") && !lv.startsWith("account") && !lv.startsWith("number") && lv != "all") return v
+            if (v.length >= 2 && !lv.startsWith("your") && !lv.startsWith("account") && !lv.startsWith("number") && lv != "all" && lv !in listOf("successful", "success", "completed", "finished", "transfer money")) return v
         }
         return ""
     }

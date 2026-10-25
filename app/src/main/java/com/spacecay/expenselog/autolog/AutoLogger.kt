@@ -15,6 +15,7 @@ import com.spacecay.expenselog.util.Money
 import com.spacecay.expenselog.util.Palette
 import com.spacecay.expenselog.util.Photos
 import com.spacecay.expenselog.work.Notifier
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlin.math.abs
 
@@ -59,28 +60,58 @@ object AutoLogger {
         Provider.OTHER -> emptyList()
     }
 
+    private val logLock = kotlinx.coroutines.sync.Mutex()
+
     /**
-     * Returns true if this payment is already logged. If an earlier copy without a reference
-     * exists (e.g. M-PESA app notification, then the SMS), the reference is added to it.
+     * Finds an already-logged copy of this payment: same reference, or same direction within a few
+     * minutes with the same amount — or, in the same wallet, an amount that differs only by a fee
+     * (telebirr notifications say 15.00 while the receipt says 16.00 including the 1.00 fee).
+     * If found, missing details (reference, payee, fee, photo) are added to it and true is returned.
      */
-    suspend fun isDuplicate(p: ParsedPayment, bookId: Long): Boolean {
+    suspend fun isDuplicate(p: ParsedPayment, bookId: Long, photo: (() -> String?)? = null, source: Int = -1): Boolean {
         val dao = Graph.dao
         if (p.ref != null && dao.countByRef(bookId, p.ref) > 0) return true
         val t = p.time ?: System.currentTimeMillis()
         val window = if (p.time != null) 3 * 60_000L else 10 * 60_000L
-        val similar = dao.findSimilar(bookId, p.amount, p.type, t - window, t + window, t) ?: return false
-        if (similar.source == TxSource.MANUAL && similar.ref == null && p.ref == null) return false
-        if (p.ref != null && similar.ref != null && similar.ref != p.ref) return false
-        if (p.ref != null && similar.ref == null) {
-            dao.updateTxn(similar.copy(ref = p.ref, payee = similar.payee.ifBlank { p.payee }))
+        val walletId = walletFor(p.provider, p.currency, create = false)
+        val near = dao.findNear(bookId, p.type, t - window, t + window)
+            .filter { it.source != TxSource.MANUAL || it.ref != null }
+            .filter { c -> p.ref == null || c.ref == null || c.ref == p.ref }
+        val match = near.filter { it.amount == p.amount }.minByOrNull { abs(it.dateTime - t) }
+            ?: near.filter { c ->
+                // Fee-sized difference only counts between different channels (notification vs receipt),
+                // so two real payments of 10 and 11 birr from the same channel stay separate.
+                val small = minOf(c.amount, p.amount)
+                val sameWallet = walletId == null || c.walletId == walletId
+                val feeSized = c.amount != p.amount && abs(c.amount - p.amount) <= maxOf(small * 7 / 100, 100L)
+                val otherChannel = source == -1 || c.source != source
+                sameWallet && otherChannel && (feeSized || (c.fee > 0 && c.amount + c.fee == p.amount))
+            }.minByOrNull { abs(it.dateTime - t) }
+            ?: return false
+
+        // Enrich the existing entry with whatever the new copy knows.
+        var updated = match
+        if (p.ref != null && match.ref == null) updated = updated.copy(ref = p.ref)
+        if (match.payee.isBlank() && p.payee.isNotBlank()) updated = updated.copy(payee = p.payee)
+        if (p.amount > match.amount && match.fee == 0L && p.type == TxType.EXPENSE) {
+            // Bigger figure = total including fee: keep the base amount, record the difference as fee.
+            updated = updated.copy(fee = p.amount - match.amount)
+        } else if (p.amount < match.amount && match.fee == 0L && p.type == TxType.EXPENSE) {
+            updated = updated.copy(amount = p.amount, fee = match.amount - p.amount)
         }
+        if (match.photos.isBlank()) photo?.invoke()?.let { updated = updated.copy(photos = it) }
+        if (updated != match) Graph.repo.saveTxn(updated)
         return true
     }
 
     /** Write a parsed payment as a transaction (unreviewed). Returns new id, or null if skipped. */
-    suspend fun log(ctx: Context, p: ParsedPayment, source: Int, photo: String? = null, notify: Boolean = true): Long? {
+    suspend fun log(ctx: Context, p: ParsedPayment, source: Int, photo: (() -> String?)? = null, notify: Boolean = true): Long? =
+        logLock.withLock { logLocked(ctx, p, source, photo, notify) }
+
+    private suspend fun logLocked(ctx: Context, p: ParsedPayment, source: Int, photoFn: (() -> String?)?, notify: Boolean): Long? {
         val bookId = Graph.prefs.bookId.value
-        if (isDuplicate(p, bookId)) return null
+        if (isDuplicate(p, bookId, photoFn, source)) return null
+        val photo = photoFn?.invoke()
         val walletId = walletFor(p.provider, p.currency) ?: return null
         val wallet = Graph.dao.getWallet(walletId) ?: return null
 

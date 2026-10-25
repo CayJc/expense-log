@@ -173,6 +173,9 @@ interface AppDao {
     @Query("SELECT * FROM transactions WHERE bookId = :bookId AND amount = :amount AND type = :type AND dateTime BETWEEN :from AND :to ORDER BY ABS(dateTime - :at) LIMIT 1")
     suspend fun findSimilar(bookId: Long, amount: Long, type: Int, from: Long, to: Long, at: Long): Txn?
 
+    @Query("SELECT * FROM transactions WHERE bookId = :bookId AND type = :type AND dateTime BETWEEN :from AND :to")
+    suspend fun findNear(bookId: Long, type: Int, from: Long, to: Long): List<Txn>
+
     @Query("SELECT categoryId FROM transactions WHERE bookId = :bookId AND payee != '' AND LOWER(payee) = LOWER(:payee) AND categoryId IS NOT NULL AND reviewed = 1 GROUP BY categoryId ORDER BY COUNT(*) DESC LIMIT 1")
     suspend fun topCategoryForPayee(bookId: Long, payee: String): Long?
 
