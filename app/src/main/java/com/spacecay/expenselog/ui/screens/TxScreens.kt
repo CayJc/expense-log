@@ -213,22 +213,57 @@ fun ReviewScreen(back: () -> Unit, go: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val list by remember(bd.bookId) { Graph.dao.observeUnreviewed(bd.bookId) }.collectAsStateWithLifecycle(emptyList())
     val hidden by Graph.prefs.hideAmounts.collectAsStateWithLifecycle()
+    val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
+    var confirmAll by remember { mutableStateOf(false) }
+
+    fun delete(t: com.spacecay.expenselog.data.Txn) {
+        scope.launch {
+            Graph.repo.deleteTxn(t.id)
+            val r = snackbar.showSnackbar("Deleted ${Money.format(t.amount, bd.currencyOf(t.walletId))}", actionLabel = "Undo",
+                duration = androidx.compose.material3.SnackbarDuration.Short)
+            if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) Graph.repo.saveTxn(t.copy(id = 0))
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
             SimpleTopBar("Review auto-logged", back) {
-                if (list.isNotEmpty()) IconButton(onClick = { scope.launch { Graph.dao.markAllReviewed(bd.bookId) } }) { Icon(Icons.Filled.DoneAll, "Mark all reviewed") }
+                if (list.isNotEmpty()) {
+                    IconButton(onClick = { confirmAll = true }) { Icon(Icons.Filled.Delete, "Delete all") }
+                    IconButton(onClick = { scope.launch { Graph.dao.markAllReviewed(bd.bookId) } }) { Icon(Icons.Filled.DoneAll, "Mark all reviewed") }
+                }
             }
         },
     ) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
             item {
-                Text("Tap a payment to set its category. Payees you categorise are remembered for next time.",
+                Text("Tap a payment to set its category, or the bin to delete it. Payees you categorise are remembered for next time.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             }
             if (list.isEmpty()) item { EmptyState(Icons.Filled.DoneAll, "All caught up", "Nothing waiting for review.") }
-            dayGroupedTxns(list, bd, hidden) { go("txedit?id=${it.id}&type=${it.type}") }
+            val groups = list.groupBy { Dates.startOfDay(it.dateTime) }.toSortedMap(compareByDescending { it })
+            groups.forEach { (day, txs) ->
+                item(key = "d$day") {
+                    Text(Dates.dayHeader(day) + " · " + Dates.fmt("d MMMM yyyy", day), style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp))
+                }
+                items(txs, key = { it.id }) { t ->
+                    AppCard(Modifier.padding(horizontal = 16.dp, vertical = 3.dp), padding = PaddingValues(start = 0.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) { TxRow(t, bd, hidden) { go("txedit?id=${t.id}&type=${t.type}") } }
+                            IconButton(onClick = { delete(t) }) { Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }
+                        }
+                    }
+                }
+            }
         }
+    }
+    if (confirmAll) ConfirmDialog("Delete all ${list.size} entries?", "Every payment waiting for review is deleted.", confirm = "Delete all",
+        onDismiss = { confirmAll = false }) {
+        val all = list.toList()
+        scope.launch { all.forEach { Graph.repo.deleteTxn(it.id) } }
     }
 }
 
