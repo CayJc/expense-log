@@ -211,7 +211,7 @@ object AutoLogger {
                 if (row != null && ref != null && abs(l.first.centerY() - ref.centerY()) < maxOf(ref.height(), l.first.height()) * 0.6) row.add(l)
                 else rows.add(mutableListOf(l))
             }
-            rows.joinToString("\n") { r -> r.sortedBy { it.first.left }.joinToString(" : ") { it.second } } + "\n" + result.text
+            rows.joinToString("\n") { r -> r.sortedBy { it.first.left }.joinToString(" : ") { it.second } } + "\n" + PaymentParser.RAW_MARK + "\n" + result.text
         } finally {
             recognizer.close()
         }

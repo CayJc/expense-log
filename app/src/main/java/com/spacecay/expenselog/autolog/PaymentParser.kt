@@ -36,6 +36,8 @@ data class ParsedPayment(
  * and OCR'd receipt screens. Works on loose text so it survives wording changes.
  */
 object PaymentParser {
+    /** OCR output = layout rows, then this marker, then the raw text (only rows are used for fees). */
+    const val RAW_MARK = "<<raw>>"
     private const val NUM = "([0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?|[0-9]+(?:\\.[0-9]{1,2})?)"
     private const val CUR = "(ETB|Birr|BIRR|Br\\.?|USD|US\\$|EUR|\\$)"
 
@@ -51,10 +53,12 @@ object PaymentParser {
     )
     private val successWords = listOf("successful", "success", "completed", "transaction details", "receipt", "source account", "transaction reference")
 
-    private val totalRx = Regex("total\\s*amount\\s*(?:debited|paid)?\\s*:?\\s*(?:ETB|Birr)?\\s*$NUM", RegexOption.IGNORE_CASE)
+    /** Decimal money like 2.00 / 6,702.40 (not percentages, not plain ids). */
+    private const val DEC = "(?<![0-9.,])([0-9]{1,3}(?:,[0-9]{3})+\\.[0-9]{1,2}|[0-9]+\\.[0-9]{1,2})(?![0-9%])"
+    private val totalRx = Regex("total\\s*(?:amount\\s*)?(?:debited|paid|charged|deducted)?[^\\n]{0,60}?(?:ETB|Birr)?\\s*$DEC", RegexOption.IGNORE_CASE)
+    private val feeWords = Regex("service\\s*(?:fee|charge)|transaction\\s*(?:fee|charge)|\\bfees?\\b|\\bcharges?\\b|commission|\\bvat\\b|disaster|risk\\s*response|levy|stamp\\s*duty|\\bexcise|\\btax\\b", RegexOption.IGNORE_CASE)
+    private val decRx = Regex(DEC)
     private val forAmountRx = Regex("(?:success\\s*for|amount\\s*of|amount|amt)\\s*:?\\s*-?\\s*$NUM", RegexOption.IGNORE_CASE)
-    private val feeRx = Regex("(?:service\\s*fee|transaction\\s*fee|\\bfee|service\\s*charge)[^0-9]{0,30}?$NUM", RegexOption.IGNORE_CASE)
-    private val vatRx = Regex("(?:VAT)[^0-9]{0,30}?$NUM", RegexOption.IGNORE_CASE)
     private val balanceRx = Regex("balance[^0-9]{0,40}?$NUM", RegexOption.IGNORE_CASE)
     private val refRx = Regex(
         "(?:transaction\\s*(?:number|no\\.?|id|ref(?:erence)?)\\b|trans\\.?\\s*id|txn\\s*id|\\bref(?:erence)?\\s*(?:no\\.?|number|id)?\\b|receipt\\s*(?:no\\.?|number))\\s*(?:is)?[\\s:#.\\-]*([A-Z0-9]{6,24})",
@@ -64,6 +68,10 @@ object PaymentParser {
     /** 24/10/2026 13:45:22 · 24/10/26 at 10:16 PM · 24-10-2026, 22:21:30 */
     private val dateRx1 = Regex("(?<!\\d)(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4}|\\d{2})\\s*(?:,|at|T)?\\s*(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp][Mm])?")
     /** 2026/10/24 14:22:10 */
+    private val months = listOf("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+    /** Oct 26, 2026, 6:55 PM · 26 Oct 2026 18:55 · 24-Oct-2026 10:30 */
+    private val dateRx3 = Regex("\\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+(\\d{1,2}),?\\s+(\\d{4}),?\\s*(?:at\\s*)?(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp][Mm])?", RegexOption.IGNORE_CASE)
+    private val dateRx4 = Regex("\\b(\\d{1,2})[\\s-]+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\\s-]+(\\d{4}),?\\s*(?:at\\s*)?(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp][Mm])?", RegexOption.IGNORE_CASE)
     private val dateRx2 = Regex("(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})[ T,]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?")
 
     private val srcNameRx = Regex("source\\s*account\\s*name[\\s:\\-]*([A-Za-z][A-Za-z .'\\-]{2,60})", RegexOption.IGNORE_CASE)
@@ -155,9 +163,16 @@ object PaymentParser {
         val (amount, currency) = picked
         if (amount <= 0) return null
 
-        val fee = (feeRx.find(text)?.let { Money.parse(it.groupValues[1]) } ?: 0L) + (vatRx.find(text)?.let { Money.parse(it.groupValues[1]) } ?: 0L)
-        val total = totalRx.find(text)?.let { Money.parse(it.groupValues[1]) }
-        val fee2 = if (fee == 0L && total != null && total > amount && total - amount < amount) total - amount else fee
+        var amountOut = amount
+        val fee2 = findFee(input, amount).let { (fee, total) ->
+            when {
+                // "Total amount debited" is the most reliable: fee = total − amount.
+                total != null && total > amount && total - amount <= maxOf(amount / 5, 5000L) -> total - amount
+                // telebirr receipt shows one figure that already includes the fee.
+                provider == Provider.TELEBIRR && fromScreenshot && "(etb)" in lower && fee in 1 until amount && total == null -> { amountOut = amount - fee; fee }
+                else -> fee
+            }
+        }
         val balance = balanceRx.find(text)?.let { Money.parse(it.groupValues[1]) }
         val ref = ftRx.find(text)?.groupValues?.get(1)
             ?: refRx.findAll(text).map { it.groupValues[1].uppercase() }.firstOrNull { r -> r.any { it.isLetter() } && r.any { it.isDigit() } }
@@ -170,7 +185,7 @@ object PaymentParser {
         }
         val time = parseTime(text)
 
-        return ParsedPayment(type, amount, fee2.coerceAtMost(amount), payee, ref, balance, time, provider, input.take(1500), currency, selfTransfer)
+        return ParsedPayment(type, amountOut, fee2.coerceIn(0L, amountOut), payee, ref, balance, time, provider, input.take(1500), currency, selfTransfer)
     }
 
     private fun currencyOf(token: String): String {
@@ -219,6 +234,40 @@ object PaymentParser {
         .trim(' ', '-', ':', '.', ',')
         .take(40)
 
+    /**
+     * Sums every fee-like line (service charge, VAT, disaster fund, commission…) and reads the
+     * "total debited" figure if shown. Works line by line on receipts and sentence by sentence on SMS.
+     * Returns (fee, total).
+     */
+    private fun findFee(input: String, amount: Long): Pair<Long, Long?> {
+        val segments = input.substringBefore(RAW_MARK).split('\n').flatMap { it.split(Regex("(?<=[a-zA-Z0-9)])\\.\\s+")) }
+        var fee = 0L
+        var total: Long? = null
+        for (seg in segments) {
+            val l = seg.lowercase()
+            if ("registration" in l || "balance" in l || "in word" in l || "limit" in l) continue
+            if ("total" in l) {
+                totalRx.find(seg)?.let { m -> Money.parse(m.groupValues[1])?.let { if (total == null) total = it } }
+                continue
+            }
+            val kw = feeWords.find(seg) ?: continue
+            // Only figures after the first fee word, never the payment amount itself.
+            decRx.findAll(seg.substring(kw.range.first)).mapNotNull { Money.parse(it.groupValues[1]) }
+                .filter { it in 1 until amount && it != amount }
+                .forEach { fee += it }
+        }
+        if (fee >= amount / 2 && amount > 0) fee = 0L   // implausible: probably misread
+        return fee to total
+    }
+
+    private fun monthTime(c: Calendar, y: Int, mo: Int, d: Int, h0: Int, mi: Int, sec: Int, ampm: String): Long {
+        var h = h0
+        if (ampm.equals("pm", true) && h < 12) h += 12
+        if (ampm.equals("am", true) && h == 12) h = 0
+        c.set(y, mo.coerceAtLeast(0), d, h, mi, sec); c.set(Calendar.MILLISECOND, 0)
+        return c.timeInMillis
+    }
+
     private fun parseTime(text: String): Long? {
         val c = Calendar.getInstance()
         val t = dateRx1.find(text)?.let { m ->
@@ -229,6 +278,12 @@ object PaymentParser {
             if (ampm == "pm" && h < 12) h += 12
             if (ampm == "am" && h == 12) h = 0
             c.set(y, g[2].toInt() - 1, g[1].toInt(), h, g[5].toInt(), g[6].toIntOrNull() ?: 0); c.set(Calendar.MILLISECOND, 0); c.timeInMillis
+        } ?: dateRx3.find(text)?.let { m ->
+            val g = m.groupValues
+            monthTime(c, g[3].toInt(), months.indexOf(g[1].lowercase().take(3)), g[2].toInt(), g[4].toInt(), g[5].toInt(), g[6].toIntOrNull() ?: 0, g[7])
+        } ?: dateRx4.find(text)?.let { m ->
+            val g = m.groupValues
+            monthTime(c, g[3].toInt(), months.indexOf(g[2].lowercase().take(3)), g[1].toInt(), g[4].toInt(), g[5].toInt(), g[6].toIntOrNull() ?: 0, g[7])
         } ?: dateRx2.find(text)?.let { m ->
             val (y, mo, d, h, mi) = m.destructured
             c.set(y.toInt(), mo.toInt() - 1, d.toInt(), h.toInt(), mi.toInt(), m.groupValues[6].toIntOrNull() ?: 0); c.set(Calendar.MILLISECOND, 0); c.timeInMillis
