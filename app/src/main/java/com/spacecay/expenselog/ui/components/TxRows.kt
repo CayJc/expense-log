@@ -2,6 +2,7 @@ package com.spacecay.expenselog.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,8 +40,9 @@ import com.spacecay.expenselog.ui.theme.LocalMoney
 import com.spacecay.expenselog.util.Dates
 import com.spacecay.expenselog.util.Money
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun TxRow(t: Txn, bd: BookData, hidden: Boolean = false, showTime: Boolean = true, onClick: () -> Unit) {
+fun TxRow(t: Txn, bd: BookData, hidden: Boolean = false, showTime: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val m = LocalMoney.current
     val d = bd.display(t)
     val code = bd.currencyOf(t.walletId)
@@ -50,7 +52,7 @@ fun TxRow(t: Txn, bd: BookData, hidden: Boolean = false, showTime: Boolean = tru
         else -> m.transfer to t.amount
     }
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box {

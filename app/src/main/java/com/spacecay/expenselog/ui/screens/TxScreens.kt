@@ -3,6 +3,8 @@
 package com.spacecay.expenselog.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,6 +39,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -87,6 +91,7 @@ fun TxDetailScreen(id: Long, back: () -> Unit, go: (String) -> Unit) {
     val t by remember(id) { Graph.dao.observeTxn(id) }.collectAsStateWithLifecycle(null)
     var confirm by remember { mutableStateOf(false) }
     var viewPhoto by remember { mutableStateOf<String?>(null) }
+    var mergePick by remember { mutableStateOf(false) }
     val hidden by Graph.prefs.hideAmounts.collectAsStateWithLifecycle()
     val tx = t
     val linked = tx?.debtId != null || tx?.goalId != null
@@ -100,6 +105,7 @@ fun TxDetailScreen(id: Long, back: () -> Unit, go: (String) -> Unit) {
                         UiBus.prefill.value = Prefill(tx.type, tx.amount, tx.walletId, tx.toWalletId, tx.categoryId, tx.note, tx.payee, System.currentTimeMillis(), tx.fee)
                         go("txedit?id=0&type=${tx.type}")
                     }) { Icon(Icons.Filled.ContentCopy, "Duplicate") }
+                    if (!linked) IconButton(onClick = { mergePick = true }) { Icon(Icons.Filled.MergeType, "Merge with…") }
                     if (!linked) IconButton(onClick = { go("txedit?id=${tx.id}&type=${tx.type}") }) { Icon(Icons.Filled.Edit, "Edit") }
                     IconButton(onClick = { confirm = true }) { Icon(Icons.Filled.Delete, "Delete") }
                 }
@@ -192,6 +198,54 @@ fun TxDetailScreen(id: Long, back: () -> Unit, go: (String) -> Unit) {
     if (confirm && tx != null) ConfirmDialog("Delete transaction?", "This can't be undone.", onDismiss = { confirm = false }) {
         scope.launch { Graph.repo.deleteTxn(tx.id); back() }
     }
+    if (mergePick && tx != null) {
+        var candidates by remember { mutableStateOf<List<com.spacecay.expenselog.data.Txn>>(emptyList()) }
+        val chosen = remember { androidx.compose.runtime.mutableStateListOf<Long>() }
+        var preview by remember { mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(tx.id) {
+            val day = 86_400_000L
+            candidates = Graph.dao.getTxnsBetween(tx.bookId, tx.dateTime - 2 * day, tx.dateTime + 2 * day)
+                .filter { it.id != tx.id && it.type == tx.type && it.walletId == tx.walletId && it.debtId == null && it.goalId == null }
+                .sortedBy { kotlin.math.abs(it.dateTime - tx.dateTime) }
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { mergePick = false },
+            title = { Text("Merge with…") },
+            text = {
+                Column {
+                    Text("Pick the entries that belong to this same payment (same wallet, within 2 days).", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    if (candidates.isEmpty()) Text("Nothing to merge with nearby.")
+                    LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                        items(candidates, key = { it.id }) { c ->
+                            Row(Modifier.fillMaxWidth().clickable { if (c.id in chosen) chosen.remove(c.id) else chosen.add(c.id) },
+                                verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.material3.Checkbox(c.id in chosen, { if (it) chosen.add(c.id) else chosen.remove(c.id) })
+                                Column(Modifier.weight(1f)) {
+                                    Text(c.payee.ifBlank { bd.display(c).title }, style = MaterialTheme.typography.bodyMedium)
+                                    Text(Dates.dateTime(c.dateTime), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Text(Money.format(c.amount, bd.currencyOf(c.walletId)), style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { preview = true }, enabled = chosen.isNotEmpty()) { Text("Next") } },
+            dismissButton = { TextButton(onClick = { mergePick = false }) { Text("Cancel") } },
+        )
+        if (preview) MergeDialog(listOf(tx) + candidates.filter { it.id in chosen }, bd, onDismiss = { preview = false }) {
+            val ids = listOf(tx.id) + chosen
+            scope.launch {
+                val (id, err) = Graph.repo.mergeTxns(ids)
+                mergePick = false
+                if (err != null) UiBus.toast.tryEmit(err)
+                else if (id != null && id != tx.id) { back(); go("tx/$id") }
+                else UiBus.toast.tryEmit("Merged")
+            }
+        }
+    }
     viewPhoto?.let { p ->
         Dialog(onDismissRequest = { viewPhoto = null }) {
             AsyncImage(Photos.file(ctx, p), null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { viewPhoto = null })
@@ -215,6 +269,13 @@ fun ReviewScreen(back: () -> Unit, go: (String) -> Unit) {
     val hidden by Graph.prefs.hideAmounts.collectAsStateWithLifecycle()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     var confirmAll by remember { mutableStateOf(false) }
+    var confirmMerge by remember { mutableStateOf(false) }
+    val selected = remember { androidx.compose.runtime.mutableStateListOf<Long>() }
+    val selecting = selected.isNotEmpty()
+    // Drop selections that disappeared (reviewed / deleted elsewhere)
+    androidx.compose.runtime.LaunchedEffect(list) { selected.retainAll(list.map { it.id }.toSet()) }
+
+    fun toggle(id: Long) { if (id in selected) selected.remove(id) else selected.add(id) }
 
     fun delete(t: com.spacecay.expenselog.data.Txn) {
         scope.launch {
@@ -225,24 +286,72 @@ fun ReviewScreen(back: () -> Unit, go: (String) -> Unit) {
         }
     }
 
+    val picked = list.filter { it.id in selected }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
-            SimpleTopBar("Review auto-logged", back) {
-                if (list.isNotEmpty()) {
-                    IconButton(onClick = { confirmAll = true }) { Icon(Icons.Filled.Delete, "Delete all") }
-                    IconButton(onClick = { scope.launch { Graph.dao.markAllReviewed(bd.bookId) } }) { Icon(Icons.Filled.DoneAll, "Mark all reviewed") }
+            if (selecting) {
+                SimpleTopBar("${selected.size} selected", { selected.clear() }) {
+                    IconButton(onClick = { confirmMerge = true }, enabled = selected.size >= 2) {
+                        Icon(Icons.Filled.MergeType, "Merge")
+                    }
+                    IconButton(onClick = {
+                        val all = picked
+                        selected.clear()
+                        scope.launch { all.forEach { Graph.repo.deleteTxn(it.id) }; snackbar.showSnackbar("Deleted ${all.size}") }
+                    }) { Icon(Icons.Filled.Delete, "Delete selected") }
+                }
+            } else {
+                SimpleTopBar("Review auto-logged", back) {
+                    if (list.isNotEmpty()) {
+                        IconButton(onClick = { confirmAll = true }) { Icon(Icons.Filled.Delete, "Delete all") }
+                        IconButton(onClick = { scope.launch { Graph.dao.markAllReviewed(bd.bookId) } }) { Icon(Icons.Filled.DoneAll, "Mark all reviewed") }
+                    }
                 }
             }
         },
     ) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
             item {
-                Text("Tap a payment to set its category, or the bin to delete it. Payees you categorise are remembered for next time.",
+                Text(
+                    if (selecting) "Tap more payments to add them, then Merge to combine them into one (amounts and fees add up)."
+                    else "Tap a payment to set its category, or the bin to delete it. Long-press to select several and merge them — e.g. a payment you had to send in two parts.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             }
             if (list.isEmpty()) item { EmptyState(Icons.Filled.DoneAll, "All caught up", "Nothing waiting for review.") }
+            // Suggest merging payments that look like one payment sent in parts.
+            if (!selecting) {
+                val sorted = list.sortedBy { it.dateTime }
+                val suggestions = mutableListOf<List<com.spacecay.expenselog.data.Txn>>()
+                var group = mutableListOf<com.spacecay.expenselog.data.Txn>()
+                for (t in sorted) {
+                    val prev = group.lastOrNull()
+                    val samePayee = prev != null && (prev.payee.isBlank() || t.payee.isBlank() || prev.payee.equals(t.payee, true))
+                    if (prev != null && t.type == prev.type && t.walletId == prev.walletId && samePayee && t.dateTime - prev.dateTime <= 15 * 60_000L &&
+                        t.debtId == null && t.goalId == null && (t.ref == null || t.ref != prev.ref)) group.add(t)
+                    else { if (group.size >= 2) suggestions += group.toList(); group = mutableListOf(t) }
+                }
+                if (group.size >= 2) suggestions += group.toList()
+                suggestions.forEach { g ->
+                    item(key = "s" + g.joinToString("-") { it.id.toString() }) {
+                        val code = bd.currencyOf(g.first().walletId)
+                        AppCard(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.MergeType, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("One payment in ${g.size} parts?", style = MaterialTheme.typography.titleSmall)
+                                    Text(g.joinToString(" + ") { Money.plain(it.amount) } + " = " + Money.format(g.sumOf { it.amount }, code) +
+                                        " within ${maxOf(1, ((g.last().dateTime - g.first().dateTime) / 60_000L).toInt())} min",
+                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                TextButton(onClick = { selected.clear(); selected.addAll(g.map { it.id }); confirmMerge = true }) { Text("Merge") }
+                            }
+                        }
+                    }
+                }
+            }
             val groups = list.groupBy { Dates.startOfDay(it.dateTime) }.toSortedMap(compareByDescending { it })
             groups.forEach { (day, txs) ->
                 item(key = "d$day") {
@@ -250,10 +359,20 @@ fun ReviewScreen(back: () -> Unit, go: (String) -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp))
                 }
                 items(txs, key = { it.id }) { t ->
-                    AppCard(Modifier.padding(horizontal = 16.dp, vertical = 3.dp), padding = PaddingValues(start = 0.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)) {
+                    val isSel = t.id in selected
+                    AppCard(
+                        Modifier.padding(horizontal = 16.dp, vertical = 3.dp)
+                            .then(if (isSel) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp)) else Modifier),
+                        padding = PaddingValues(start = 0.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f)) { TxRow(t, bd, hidden) { go("txedit?id=${t.id}&type=${t.type}") } }
-                            IconButton(onClick = { delete(t) }) { Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }
+                            Box(Modifier.weight(1f)) {
+                                TxRow(t, bd, hidden, onLongClick = { toggle(t.id) }) {
+                                    if (selecting) toggle(t.id) else go("txedit?id=${t.id}&type=${t.type}")
+                                }
+                            }
+                            if (selecting) androidx.compose.material3.Checkbox(isSel, { toggle(t.id) })
+                            else IconButton(onClick = { delete(t) }) { Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
@@ -265,6 +384,46 @@ fun ReviewScreen(back: () -> Unit, go: (String) -> Unit) {
         val all = list.toList()
         scope.launch { all.forEach { Graph.repo.deleteTxn(it.id) } }
     }
+    if (confirmMerge) MergeDialog(picked, bd, onDismiss = { confirmMerge = false }) {
+        val ids = picked.map { it.id }
+        scope.launch {
+            val (id, err) = Graph.repo.mergeTxns(ids)
+            if (err != null) snackbar.showSnackbar(err) else { selected.clear(); if (id != null) go("txedit?id=$id&type=${picked.first().type}") }
+        }
+    }
+}
+
+/** Shows what the merged entry will look like before merging. */
+@Composable
+fun MergeDialog(txns: List<com.spacecay.expenselog.data.Txn>, bd: com.spacecay.expenselog.ui.BookData, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val code = bd.currencyOf(txns.firstOrNull()?.walletId)
+    val sameWallet = txns.map { it.walletId }.distinct().size == 1
+    val sameType = txns.map { it.type }.distinct().size == 1
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Merge ${txns.size} entries?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                txns.sortedBy { it.dateTime }.forEach { t ->
+                    Row {
+                        Text(Dates.time(t.dateTime) + "  " + (t.payee.ifBlank { bd.display(t).title }), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        Text(Money.format(t.amount, code), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                androidx.compose.material3.HorizontalDivider()
+                Row {
+                    Text("Merged", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Text(Money.format(txns.sumOf { it.amount }, code), fontWeight = FontWeight.SemiBold)
+                }
+                val fee = txns.sumOf { it.fee }
+                if (fee > 0) Text("Fees together: ${Money.format(fee, code)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!sameWallet || !sameType) Text("These are from different wallets or types and can't be merged.", color = MaterialTheme.colorScheme.error)
+                else Text("You can set the category and note right after.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { onDismiss(); onConfirm() }, enabled = sameWallet && sameType) { Text("Merge") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

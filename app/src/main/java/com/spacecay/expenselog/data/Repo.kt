@@ -162,6 +162,41 @@ class Repo(private val ctx: Context, private val db: AppDatabase, val dao: AppDa
         return id
     }
 
+    /**
+     * Merge several entries into one (e.g. 610 + 1,000 sent for one 1,610 lunch).
+     * Amounts and fees add up; the earliest entry is kept with its date; details are combined.
+     * All entries must be the same type and wallet. Returns the kept id, or null with a reason.
+     */
+    suspend fun mergeTxns(ids: List<Long>): Pair<Long?, String?> {
+        val list = ids.distinct().mapNotNull { dao.getTxn(it) }.sortedBy { it.dateTime }
+        if (list.size < 2) return null to "Pick at least two entries"
+        if (list.map { it.type }.distinct().size > 1) return null to "Can't merge an expense with an income or transfer"
+        if (list.map { it.walletId }.distinct().size > 1) return null to "Entries are from different wallets"
+        if (list.map { it.toWalletId }.distinct().size > 1) return null to "Transfers go to different wallets"
+        if (list.any { it.debtId != null || it.goalId != null }) return null to "Debt and goal entries can't be merged"
+        val base = list.first()
+        val refs = list.mapNotNull { it.ref }.distinct()
+        val notes = list.map { it.note.trim() }.filter { it.isNotEmpty() }.distinct()
+        val merged = base.copy(
+            amount = list.sumOf { it.amount },
+            fee = list.sumOf { it.fee },
+            toAmount = if (list.all { it.toAmount != null }) list.sumOf { it.toAmount ?: 0L } else base.toAmount,
+            categoryId = list.firstNotNullOfOrNull { it.categoryId },
+            payee = list.map { it.payee }.firstOrNull { it.isNotBlank() } ?: "",
+            note = (notes + if (refs.size > 1) listOf("refs " + refs.drop(1).joinToString(", ")) else emptyList()).joinToString(" · "),
+            photos = list.flatMap { com.spacecay.expenselog.util.Photos.split(it.photos) }.distinct().joinToString("|"),
+            ref = refs.firstOrNull(),
+            reviewed = list.all { it.reviewed },
+            splitId = null,
+        )
+        db.withTransaction {
+            dao.updateTxn(merged)
+            list.drop(1).forEach { dao.deleteTxn(it.id) }
+        }
+        refreshWidget()
+        return base.id to null
+    }
+
     suspend fun deleteTxn(id: Long) {
         val t = dao.getTxn(id) ?: return
         db.withTransaction {
